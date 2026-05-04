@@ -106,9 +106,9 @@ async def generate_song(
         logger.info("Текст песни успешно сгенерирован.")
         return song_text
 
-    except Exception as e:
+   except Exception as e:
     logger.exception("OPENAI ERROR")
-    raise
+    return f"ERROR: {e}"
 
 
 async def edit_song(original_song: str, edit_request: str) -> str:
