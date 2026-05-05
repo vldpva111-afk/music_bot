@@ -22,13 +22,19 @@ async def _create_task(session, text: str):
 
         json={
 
-            "customMode": False,
+            "customMode": True,
 
             "instrumental": False,
 
-            "model": "V5_5",
+            "model": "V4_5ALL",
 
-            "prompt": text
+            "prompt": text,              # текст песни
+
+            "style": "Pop",              # стиль (пока фикс)
+
+            "title": "AI Song",          # название
+
+            "callBackUrl": "https://example.com/callback"
 
         }
 
@@ -36,9 +42,15 @@ async def _create_task(session, text: str):
 
         data = await resp.json()
 
+        print("CREATE TASK RESPONSE:", data)  # 👈 оставь для дебага
+
         if resp.status != 200:
 
             raise Exception(data)
+
+        if not data.get("data"):
+
+            raise Exception(f"Invalid response: {data}")
 
         return data["data"]["taskId"]
 
