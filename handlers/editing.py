@@ -4,6 +4,7 @@
 """
 
 import logging
+from datetime import datetime
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -14,6 +15,7 @@ from services.openai_service import edit_song
 
 logger = logging.getLogger(__name__)
 router = Router()
+user_limits = {}
 
 
 @router.callback_query(SongCreation.editing, lambda c: c.data == "edit_song")
@@ -33,6 +35,28 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
     Пользователь написал пожелания по правкам.
     Отправляем в OpenAI с контекстом оригинальной песни.
     """
+    # 🔥 ЛИМИТ ПРАВОК
+    user_id = message.from_user.id
+    today = datetime.now().date()
+
+    if user_id not in user_limits:
+        user_limits[user_id] = {
+            "date": today,
+            "create_count": 0,
+            "edit_count": 0
+        }
+
+    if user_limits[user_id]["date"] != today:
+        user_limits[user_id] = {
+            "date": today,
+            "create_count": 0,
+            "edit_count": 0
+        }
+
+    if user_limits[user_id]["edit_count"] >= 5:
+        await message.answer("❌ Лимит правок на сегодня (5) исчерпан. Попробуй завтра 🎵")
+        return
+
     edit_request = message.text.strip()
 
     if len(edit_request) < 3:
