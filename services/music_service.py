@@ -70,40 +70,49 @@ async def _wait_task(session, task_id: str):
 
             data = await resp.json()
 
-            print("WAIT RESPONSE:", data)  # 👈 лог
+            print("WAIT RESPONSE:", data)
 
             if resp.status != 200:
 
                 raise Exception(data)
 
             if not data.get("data"):
+
                 continue
 
             status = data["data"].get("status")
+
             print("STATUS:", status)
 
             if status == "failed":
+
                 raise Exception(f"Music generation failed: {data}")
 
             if status == "complete":
+
                 songs = data["data"].get("songs") or []
 
-            if not songs:
-                raise Exception(f"No songs in response: {data}")
+                if not songs:
 
-            song = songs[0]
+                    raise Exception(f"No songs in response: {data}")
 
-            audio_url = (
-                song.get("audioUrl")
-                or song.get("audio_url")
-                or song.get("url")
+                song = songs[0]
 
-    )
+                audio_url = (
 
-            if not audio_url:
-                raise Exception(f"No audio url: {song}")
+                    song.get("audioUrl")
 
-            return audio_url
+                    or song.get("audio_url")
+
+                    or song.get("url")
+
+                )
+
+                if not audio_url:
+
+                    raise Exception(f"No audio url: {song}")
+
+                return audio_url
 
         await asyncio.sleep(3)
 
