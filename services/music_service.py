@@ -6,7 +6,7 @@ INITIAL_DELAY = 5       # секунд перед первым поллинго�
 POLL_INTERVAL = 3       # секунд между запросами
 MAX_ATTEMPTS  = 60      # 60 × 3s = 3 минуты максимум
 
-TERMINAL_STATUSES = {"complete", "failed", "error"}
+TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
 
 
 async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "Pop") -> str:
@@ -44,7 +44,7 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
 
     for attempt in range(MAX_ATTEMPTS):
         async with session.get(
-            f"{settings.MUSIC_API_URL}/details/{task_id}",
+            f"{settings.MUSIC_API_URL}/generate/record-info?taskId={task_id}",
             headers={"Authorization": f"Bearer {settings.MUSIC_API_KEY}"},
         ) as resp:
             data = await resp.json()
@@ -62,10 +62,10 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
-            if status == "complete":
-                songs = task_data.get("songs") or []
+            if status == "SUCCESS":
+                songs = (task_data.get("response") or {}).get("sunoData") or []
                 if not songs:
-                    raise Exception(f"Status complete but no songs: {data}")
+                    raise Exception(f"Status SUCCESS but no sunoData: {data}")
 
                 song = songs[0]
                 audio_url = (
