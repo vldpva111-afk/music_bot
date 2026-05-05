@@ -9,32 +9,10 @@ from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
 from keyboards import get_details_keyboard
+from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, VALID_VOICES
 
 logger = logging.getLogger(__name__)
 router = Router()
-
-VALID_VOICES = {"voice_male", "voice_female"}
-
-VOICE_LABELS = {
-    "voice_male":   "👨 Мужской",
-    "voice_female": "👩 Женский",
-}
-
-GENRE_LABELS = {
-    "genre_rap":     "🎤 Рэп/хип-хоп",
-    "genre_pop":     "🎶 Поп",
-    "genre_rock":    "🎸 Рок",
-    "genre_chanson": "🎻 Шансон",
-    "genre_disco":   "🕺 Диско 80-х",
-    "genre_classic": "🎼 Классика",
-}
-
-MOOD_LABELS = {
-    "mood_happy": "😄 Радостное",
-    "mood_sad":   "😢 Грустное",
-    "mood_calm":  "😌 Спокойное",
-    "mood_love":  "❤️ Любовное",
-}
 
 DETAILS_TEXT = (
     "✍️ Напиши несколько деталей о человеке, "
@@ -60,15 +38,12 @@ async def on_voice_selected(callback: CallbackQuery, state: FSMContext) -> None:
     mood_label  = MOOD_LABELS.get(data.get("mood", ""), "")
     voice_label = VOICE_LABELS[voice]
 
-    # Резюме
     await callback.message.answer(
         f"🎵 <b>Жанр песни:</b> {genre_label}\n"
         f"🎭 <b>Настроение:</b> {mood_label}\n"
         f"🎤 <b>Голос:</b> {voice_label}",
         parse_mode="HTML",
     )
-
-    # Следующий шаг — детали
     await callback.message.answer(
         DETAILS_TEXT,
         parse_mode="HTML",

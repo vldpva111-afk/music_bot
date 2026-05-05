@@ -6,43 +6,19 @@
 import logging
 from openai import AsyncOpenAI
 from config import settings
+from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_PROMPT_LABELS
 
 logger = logging.getLogger(__name__)
 
-# Инициализируем клиент один раз при импорте модуля
-def get_client():
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-
-# Словари для человекочитаемых названий
-GENRE_LABELS = {
-    "genre_rap": "Рэп/хип-хоп",
-    "genre_pop": "Поп",
-    "genre_rock": "Рок",
-    "genre_chanson": "Шансон",
-    "genre_disco": "Диско 80-х",
-    "genre_classic": "Классика",
-}
-
-MOOD_LABELS = {
-    "mood_happy": "радостное",
-    "mood_sad": "грустное",
-    "mood_calm": "спокойное",
-    "mood_love": "любовное",
-}
-
-VOICE_LABELS = {
-    "voice_male": "мужской",
-    "voice_female": "женский",
-}
+# Синглтон — создаём клиент один раз при импорте модуля
+_client: AsyncOpenAI | None = None
 
 
-LANG_LABELS = {
-    "ru": "русском",
-    "kz": "казахском",
-    "tt": "татарском",
-    "uz": "узбекском",
-    "en": "английском",
-}
+def get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return _client
 
 
 async def generate_song(
@@ -56,18 +32,19 @@ async def generate_song(
     Генерирует текст песни через OpenAI API.
 
     Args:
-        genre: callback_data жанра (напр. 'genre_rap')
-        mood: callback_data настроения (напр. 'mood_happy')
-        voice: callback_data голоса (напр. 'voice_male')
+        genre:   callback_data жанра (напр. 'genre_rap')
+        mood:    callback_data настроения (напр. 'mood_happy')
+        voice:   callback_data голоса (напр. 'voice_male')
         details: свободный текст с описанием человека
+        lang:    код языка ('ru', 'kz', 'tt', 'uz', 'en')
 
     Returns:
-        Готовый текст песни или сообщение об ошибке.
+        Готовый текст песни.
     """
     genre_label = GENRE_LABELS.get(genre, genre)
     mood_label  = MOOD_LABELS.get(mood, mood)
     voice_label = VOICE_LABELS.get(voice, voice)
-    lang_label  = LANG_LABELS.get(lang, "русском")
+    lang_label  = LANG_PROMPT_LABELS.get(lang, "русском")
 
     prompt = f"""Ты — талантливый автор текстов песен.
 
@@ -83,7 +60,7 @@ async def generate_song(
 3. Песня должна быть эмоциональной и личной
 4. Упомяни имя и детали из описания человека
 5. Соответствуй стилю жанра {genre_label}
-6. Не слишком длинно до 150 слов
+6. Не слишком длинно — до 150 слов
 
 Формат ответа:
 [Куплет 1]
@@ -99,19 +76,24 @@ async def generate_song(
 ...
 """
 
-    logger.info(f"Генерируем песню: жанр={genre_label}, настроение={mood_label}, голос={voice_label}")
+    # ВАЖНО: system prompt НЕ фиксирует язык — язык задаётся через prompt выше
+    system_prompt = (
+        "Ты профессиональный автор текстов песен. "
+        "Пишешь на том языке, который указан в запросе пользователя. "
+        "Создаёшь живые, эмоциональные и рифмованные тексты."
+    )
+
+    logger.info(
+        f"Генерируем песню: жанр={genre_label}, настроение={mood_label}, "
+        f"голос={voice_label}, язык={lang_label}"
+    )
+
     try:
-
-        client = get_client()
-
-        response = await client.chat.completions.create(
+        response = await get_client().chat.completions.create(
             model="gpt-4o",
             messages=[
-                {
-                    "role": "system",
-                    "content": "Ты профессиональный автор текстов песен. Пишешь только на русском языке. Создаёшь живые, эмоциональные и рифмованные тексты.",
-                },
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": prompt},
             ],
             max_tokens=1000,
             temperature=0.85,
@@ -131,10 +113,10 @@ async def edit_song(original_song: str, edit_request: str) -> str:
 
     Args:
         original_song: оригинальный текст песни
-        edit_request: пожелания пользователя по правкам
+        edit_request:  пожелания пользователя по правкам
 
     Returns:
-        Исправленный текст песни или сообщение об ошибке.
+        Исправленный текст песни.
     """
     prompt = f"""У тебя есть текст песни:
 
@@ -143,22 +125,22 @@ async def edit_song(original_song: str, edit_request: str) -> str:
 Пользователь просит внести следующие правки:
 {edit_request}
 
-Внеси правки, сохраняя общую структуру, рифму и стиль песни. 
+Внеси правки, сохраняя общую структуру, рифму и стиль песни.
 Верни только обновлённый текст песни без лишних комментариев.
 """
 
     logger.info("Редактируем текст песни по запросу пользователя.")
 
     try:
-
-        client = get_client()
-
-        response = await client.chat.completions.create(
+        response = await get_client().chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "Ты профессиональный редактор текстов песен. Вносишь правки аккуратно, сохраняя стиль и структуру.",
+                    "content": (
+                        "Ты профессиональный редактор текстов песен. "
+                        "Вносишь правки аккуратно, сохраняя стиль и структуру."
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ],

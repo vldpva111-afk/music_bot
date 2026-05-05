@@ -1,5 +1,9 @@
 aiogram==3.13.1
+aiogram[redis]           # RedisStorage для FSM
 openai==1.3.7
 httpx==0.25.2
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
+asyncpg==0.29.0          # PostgreSQL async driver
+redis==5.0.1             # Redis клиент
+aiohttp==3.9.1           # HTTP для music_service

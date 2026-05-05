@@ -11,33 +11,12 @@ from aiogram.types import CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
 from services.music_service import generate_music_from_text, download_audio
+from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
+from database import mark_music_done
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-# Человекочитаемые названия для передачи в Suno
-GENRE_STYLE = {
-    "genre_rap":     "Hip-hop rap",
-    "genre_pop":     "Pop",
-    "genre_rock":    "Rock",
-    "genre_chanson":  "Chanson",
-    "genre_disco":   "Disco 80s",
-    "genre_classic": "Classical",
-}
-
-MOOD_STYLE = {
-    "mood_happy": "upbeat joyful",
-    "mood_sad":   "melancholic sad",
-    "mood_calm":  "calm relaxing",
-    "mood_love":  "romantic loving",
-}
-
-VOICE_STYLE = {
-    "voice_male":   "male vocals",
-    "voice_female": "female vocals",
-}
-
-# Сообщения прогресса — обновляются каждые ~15 секунд
 PROGRESS_MESSAGES = [
     "🎵 Создаю вашу песню...\n⏳ Ожидание может занять несколько минут",
     "🎵 Создаю вашу песню...\n🎼 Подбираю мелодию и аранжировку",
@@ -54,74 +33,76 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
     if not callback.message:
         return
 
-    data = await state.get_data()
-    song_text = data.get("current_song")
+    data          = await state.get_data()
+    song_text     = data.get("current_song")
+    generation_id = data.get("generation_id")
 
     if not song_text:
         await callback.message.answer("❌ Не найден текст песни. Начни сначала — /start")
         return
 
-    # Собираем стиль из выборов пользователя
     genre = data.get("genre", "genre_pop")
     mood  = data.get("mood",  "mood_happy")
     voice = data.get("voice", "voice_male")
 
-    style_parts = [
+    style = ", ".join([
         GENRE_STYLE.get(genre, "Pop"),
         MOOD_STYLE.get(mood, "upbeat"),
         VOICE_STYLE.get(voice, "male vocals"),
-    ]
-    style = ", ".join(style_parts)
+    ])
 
     logger.info(f"Генерация музыки для {callback.from_user.id}: style={style}")
 
-    # Показываем первое сообщение о прогрессе
     loading_msg = await callback.message.answer(PROGRESS_MESSAGES[0])
-
-    # Запускаем анимацию прогресса в фоне
     progress_task = asyncio.create_task(
         _animate_progress(loading_msg, PROGRESS_MESSAGES)
     )
 
     try:
-        # Генерируем музыку — передаём текст и стиль
-        audio_url = await generate_music_from_text(song_text, style=style)
+        audio_url   = await generate_music_from_text(song_text, style=style)
 
         if not audio_url:
             raise Exception("Empty audio_url from API")
 
-        # Скачиваем mp3
         audio_bytes = await download_audio(audio_url)
         logger.info(f"Размер аудио: {len(audio_bytes)} байт")
 
         if len(audio_bytes) < 10_000:
             raise Exception(f"Файл слишком маленький: {len(audio_bytes)} байт")
 
-        # Останавливаем анимацию
         progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+        # Отмечаем в БД что музыка успешно создана
+        if generation_id:
+            await mark_music_done(generation_id)
+
         await loading_msg.delete()
 
-        # 1. Плеер — слушать прямо в Telegram
         await callback.bot.send_audio(
             chat_id=callback.message.chat.id,
             audio=BufferedInputFile(audio_bytes, filename="song.mp3"),
             title="🎵 Твоя песня",
             caption="🎉 Твоя персональная песня готова! Слушай прямо здесь 👆",
         )
-
-        # 2. Документ — для скачивания
-        await callback.bot.send_document(
+        await callback.bot.send_message(
             chat_id=callback.message.chat.id,
-            document=BufferedInputFile(audio_bytes, filename="song.mp3"),
-            caption=(
-                "⬇️ <b>Нажми чтобы скачать MP3 на устройство</b>\n\n"
-                "Хочешь создать ещё одну песню? Нажми /start"
+            text=(
+                "🎊 Готово! Хочешь создать ещё одну песню?\n\n"
+                "Нажми /start — начнём сначала 🎵"
             ),
-            parse_mode="HTML",
         )
 
     except Exception as e:
         progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
         logger.error(f"Ошибка генерации музыки для {callback.from_user.id}: {e}")
 
         if "insufficient_credits" in str(e):
@@ -145,7 +126,7 @@ async def _animate_progress(msg, messages: list) -> None:
             try:
                 await msg.edit_text(text)
             except Exception:
-                pass  # сообщение могло уже удалиться
+                pass
             idx += 1
     except asyncio.CancelledError:
         pass

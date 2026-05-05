@@ -10,20 +10,10 @@ from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
 from keyboards import get_mood_keyboard
+from constants import GENRE_LABELS, VALID_GENRES
 
 logger = logging.getLogger(__name__)
 router = Router()
-
-VALID_GENRES = {"genre_rap", "genre_pop", "genre_rock", "genre_chanson", "genre_disco", "genre_classic"}
-
-GENRE_LABELS = {
-    "genre_rap":     "🎤 Рэп/хип-хоп",
-    "genre_pop":     "🎶 Поп",
-    "genre_rock":    "🎸 Рок",
-    "genre_chanson": "🎻 Шансон",
-    "genre_disco":   "🕺 Диско 80-х",
-    "genre_classic": "🎼 Классика",
-}
 
 
 @router.callback_query(SongCreation.genre, lambda c: c.data in VALID_GENRES)
@@ -33,10 +23,7 @@ async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
 
     label = GENRE_LABELS[genre]
 
-    # Резюме выбора
-    await callback.message.answer(f"🎵 <b>Жанр песни:</b> {label}")
-
-    # Следующий шаг
+    await callback.message.answer(f"🎵 <b>Жанр песни:</b> {label}", parse_mode="HTML")
     await callback.message.answer(
         "😊 Теперь выбери настроение твоей будущей песни:",
         reply_markup=get_mood_keyboard(),
