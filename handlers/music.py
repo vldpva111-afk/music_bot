@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery
 
 from aiogram.fsm.context import FSMContext
 
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from services.music_service import generate_music_from_text, download_audio
 
@@ -68,14 +68,22 @@ async def on_create_song(callback: CallbackQuery, state: FSMContext):
 
         audio = BufferedInputFile(audio_bytes, filename="song.mp3")
 
+        download_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬇️ Скачать MP3", url=audio_url)]
+        ])
+
+        # 1. плеер — можно слушать прямо в Telegram
         await callback.bot.send_audio(
-
             chat_id=callback.message.chat.id,
-
             audio=audio,
+            title="Твоя песня 🎵",
+        )
 
-            title="Твоя песня 🎵"
-
+        # 2. тот же файл как документ — очевидная кнопка скачать
+        await callback.bot.send_document(
+            chat_id=callback.message.chat.id,
+            document=BufferedInputFile(audio_bytes, filename="song.mp3"),
+            caption="⬇️ Нажми чтобы скачать песню на устройство",
         )
 
     except Exception as e:
