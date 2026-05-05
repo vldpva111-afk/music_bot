@@ -2,6 +2,7 @@ import logging
 from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.types import BufferedInputFile
 
 from services.music_service import generate_music_from_text
 
@@ -36,11 +37,13 @@ async def on_create_song(callback: CallbackQuery, state: FSMContext):
         logger.info(f"AUDIO TYPE: {type(audio_bytes)}")
         logger.info(f"AUDIO VALUE: {audio_bytes}")
 
+        audio = BufferedInputFile(audio_bytes, filename="song.mp3")
+
         await callback.bot.send_audio(
 
             chat_id=callback.message.chat.id,
 
-            audio=audio_bytes,
+            audio=audio,
 
             title="Твоя песня 🎵"
 
