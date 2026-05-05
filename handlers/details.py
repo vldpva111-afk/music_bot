@@ -56,7 +56,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         user_limits[user_id] = {"date": today, "count": 0}
 
     if user_limits[user_id]["count"] >= 5:
-        print("LIMIT HIT:", user_id). 
+        print("LIMIT HIT:", user_id)
 
         await message.answer("❌ Лимит на сегодня (5 песен) исчерпан. Попробуй завтра 🎵")
 
