@@ -8,7 +8,7 @@ from services.music_service import generate_music_from_text
 router = Router()
 logger = logging.getLogger(__name__)
 
-@router.callback_query(lambda c: c.data == "create_song")
+@router.callback_query(lambda c: c.data == "make_music")
 async def on_create_song(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()

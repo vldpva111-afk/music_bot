@@ -97,7 +97,7 @@ def get_result_keyboard() -> InlineKeyboardMarkup:
     """Кнопки после показа готовой песни."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎵 Создать песню", callback_data="create_song")],
+            [InlineKeyboardButton(text="🎵 Сделать музыку", callback_data="make_music")],
             [InlineKeyboardButton(text="✏️ Внести правки", callback_data="edit_song")],
         ]
     )
