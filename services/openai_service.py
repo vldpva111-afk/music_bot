@@ -36,11 +36,21 @@ VOICE_LABELS = {
 }
 
 
+LANG_LABELS = {
+    "ru": "русском",
+    "kz": "казахском",
+    "tt": "татарском",
+    "uz": "узбекском",
+    "en": "английском",
+}
+
+
 async def generate_song(
     genre: str,
     mood: str,
     voice: str,
     details: str,
+    lang: str = "ru",
 ) -> str:
     """
     Генерирует текст песни через OpenAI API.
@@ -55,15 +65,16 @@ async def generate_song(
         Готовый текст песни или сообщение об ошибке.
     """
     genre_label = GENRE_LABELS.get(genre, genre)
-    mood_label = MOOD_LABELS.get(mood, mood)
+    mood_label  = MOOD_LABELS.get(mood, mood)
     voice_label = VOICE_LABELS.get(voice, voice)
+    lang_label  = LANG_LABELS.get(lang, "русском")
 
     prompt = f"""Ты — талантливый автор текстов песен.
 
-Напиши персональный текст песни на русском языке со следующими параметрами:
+Напиши персональный текст песни на {lang_label} языке со следующими параметрами:
 - Жанр: {genre_label}
 - Настроение: {mood_label}
-- Голос исполнителя: {voice_label}
+- Стиль подачи текста (лирическая персона): {voice_label} голос (тон, подача и стиль написания строк)
 - Информация о человеке, которому посвящена песня: {details}
 
 Требования к тексту:

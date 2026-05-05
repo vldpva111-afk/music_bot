@@ -1,5 +1,6 @@
 """
 Хэндлер выбора жанра.
+После выбора показывает резюме и предлагает выбрать настроение.
 """
 
 import logging
@@ -15,16 +16,32 @@ router = Router()
 
 VALID_GENRES = {"genre_rap", "genre_pop", "genre_rock", "genre_chanson", "genre_disco", "genre_classic"}
 
+GENRE_LABELS = {
+    "genre_rap":     "🎤 Рэп/хип-хоп",
+    "genre_pop":     "🎶 Поп",
+    "genre_rock":    "🎸 Рок",
+    "genre_chanson": "🎻 Шансон",
+    "genre_disco":   "🕺 Диско 80-х",
+    "genre_classic": "🎼 Классика",
+}
+
 
 @router.callback_query(SongCreation.genre, lambda c: c.data in VALID_GENRES)
 async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
-    """Пользователь выбрал жанр — сохраняем и переходим к настроению."""
-    await state.update_data(genre=callback.data)
+    genre = callback.data
+    await state.update_data(genre=genre)
 
-    await callback.message.edit_text(
-        "Какого настроения ты хочешь песню? 🎭",
+    label = GENRE_LABELS[genre]
+
+    # Резюме выбора
+    await callback.message.answer(f"🎵 <b>Жанр песни:</b> {label}")
+
+    # Следующий шаг
+    await callback.message.answer(
+        "😊 Теперь выбери настроение твоей будущей песни:",
         reply_markup=get_mood_keyboard(),
     )
+
     await state.set_state(SongCreation.mood)
     await callback.answer()
-    logger.info(f"Пользователь {callback.from_user.id} выбрал жанр: {callback.data}")
+    logger.info(f"Пользователь {callback.from_user.id} выбрал жанр: {genre}")

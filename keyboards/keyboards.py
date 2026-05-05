@@ -1,103 +1,90 @@
 """
-Клавиатуры бота.
-Все inline и reply кнопки хранятся здесь централизованно.
+Клавиатуры бота. Все inline кнопки хранятся здесь централизованно.
 """
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-# ─────────────────────────────────────────────
-# Стартовая клавиатура
-# ─────────────────────────────────────────────
+# ── Старт ────────────────────────────────────────────────────────────────────
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
-    """Кнопка 'Создать песню' на старте."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎵 Создать песню", callback_data="create_song")]
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎵 Начать", callback_data="create_song")]
+    ])
 
 
-# ─────────────────────────────────────────────
-# Выбор жанра
-# ─────────────────────────────────────────────
+# ── Жанр ─────────────────────────────────────────────────────────────────────
 
 def get_genre_keyboard() -> InlineKeyboardMarkup:
-    """Кнопки выбора музыкального жанра."""
-    genres = [
-        ("🎤 Рэп/хип-хоп", "genre_rap"),
-        ("🎶 Поп", "genre_pop"),
-        ("🎸 Рок", "genre_rock"),
-        ("🎻 Шансон", "genre_chanson"),
-        ("🕺 Диско 80-х", "genre_disco"),
-        ("🎼 Классика", "genre_classic"),
-    ]
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=cb)]
-            for label, cb in genres
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎤 Рэп/хип-хоп",  callback_data="genre_rap")],
+        [InlineKeyboardButton(text="🎶 Поп",           callback_data="genre_pop")],
+        [InlineKeyboardButton(text="🎸 Рок",           callback_data="genre_rock")],
+        [InlineKeyboardButton(text="🎻 Шансон",        callback_data="genre_chanson")],
+        [InlineKeyboardButton(text="🕺 Диско 80-х",    callback_data="genre_disco")],
+        [InlineKeyboardButton(text="🎼 Классика",      callback_data="genre_classic")],
+    ])
 
 
-# ─────────────────────────────────────────────
-# Выбор настроения
-# ─────────────────────────────────────────────
+# ── Настроение ────────────────────────────────────────────────────────────────
 
 def get_mood_keyboard() -> InlineKeyboardMarkup:
-    """Кнопки выбора настроения песни."""
-    moods = [
-        ("😄 Радостное", "mood_happy"),
-        ("😢 Грустное", "mood_sad"),
-        ("😌 Спокойное", "mood_calm"),
-        ("❤️ Любовное", "mood_love"),
-    ]
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=cb)]
-            for label, cb in moods
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="😄 Радостное",  callback_data="mood_happy")],
+        [InlineKeyboardButton(text="😢 Грустное",   callback_data="mood_sad")],
+        [InlineKeyboardButton(text="😌 Спокойное",  callback_data="mood_calm")],
+        [InlineKeyboardButton(text="❤️ Любовное",   callback_data="mood_love")],
+    ])
 
 
-# ─────────────────────────────────────────────
-# Выбор голоса
-# ─────────────────────────────────────────────
+# ── Голос ─────────────────────────────────────────────────────────────────────
 
 def get_voice_keyboard() -> InlineKeyboardMarkup:
-    """Кнопки выбора голоса исполнителя."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Мужским", callback_data="voice_male")],
-            [InlineKeyboardButton(text="👩 Женским", callback_data="voice_female")],
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨 Мужским",  callback_data="voice_male")],
+        [InlineKeyboardButton(text="👩 Женским",  callback_data="voice_female")],
+    ])
 
 
-# ─────────────────────────────────────────────
-# Ввод деталей / язык
-# ─────────────────────────────────────────────
+# ── Детали: язык + свой текст ─────────────────────────────────────────────────
 
-def get_details_keyboard() -> InlineKeyboardMarkup:
-    """Дополнительные опции при вводе деталей."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🇷🇺 Язык песни: Русский", callback_data="lang_ru")],
-            [InlineKeyboardButton(text="✍️ У меня есть свой текст", callback_data="own_text")],
-        ]
-    )
+def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+    """
+    Показывает кнопку выбора языка (с раскрытием) и кнопку 'Свой текст'.
+    lang — текущий выбранный язык ('ru', 'kz', 'tt', 'uz', 'en').
+    """
+    lang_labels = {
+        "ru": "🇷🇺 Русский",
+        "kz": "🇰🇿 Казакша",
+        "tt": "🇷🇺 Татарча",
+        "uz": "🇺🇿 Озбекча",
+        "en": "🇬🇧 English",
+    }
+    # Основная кнопка языка — показывает текущий выбор
+    selected_label = lang_labels.get(lang, "🇷🇺 Русский")
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        # Кнопка-заголовок (открывает варианты)
+        [InlineKeyboardButton(
+            text=f"🌍 Язык песни: {selected_label}",
+            callback_data="lang_menu"
+        )],
+        # Языки всегда видны — одна строка
+        [
+            InlineKeyboardButton(text="🇷🇺 Рус",  callback_data="lang_ru"),
+            InlineKeyboardButton(text="🇰🇿 Каз",  callback_data="lang_kz"),
+            InlineKeyboardButton(text="🇷🇺 Тат",  callback_data="lang_tt"),
+            InlineKeyboardButton(text="🇺🇿 Узб",  callback_data="lang_uz"),
+            InlineKeyboardButton(text="🇬🇧 Eng",  callback_data="lang_en"),
+        ],
+        [InlineKeyboardButton(text="✍️ У меня есть готовый текст", callback_data="own_text")],
+    ])
 
 
-# ─────────────────────────────────────────────
-# После генерации песни
-# ─────────────────────────────────────────────
+# ── После генерации текста ────────────────────────────────────────────────────
 
 def get_result_keyboard() -> InlineKeyboardMarkup:
-    """Кнопки после показа готовой песни."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎵 Сделать музыку", callback_data="make_music")],
-            [InlineKeyboardButton(text="✏️ Внести правки", callback_data="edit_song")],
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎵 Создать песню",  callback_data="make_music")],
+        [InlineKeyboardButton(text="✏️ Внести правки",  callback_data="edit_song")],
+    ])
