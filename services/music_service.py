@@ -82,3 +82,25 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
             raise Exception(f"Music generation failed: {data}")
 
     raise TimeoutError(f"Music generation timeout after {MAX_ATTEMPTS * POLL_INTERVAL}s")
+
+
+async def generate_music_from_text(text: str, style: str = "Pop") -> str:
+    """
+    Публичная функция: создаёт задачу и ждёт audio_url.
+    Возвращает прямую ссылку на mp3.
+    """
+    async with aiohttp.ClientSession() as session:
+        task_id = await _create_task(session, text, style)
+        audio_url = await _wait_task(session, task_id)
+        return audio_url
+
+
+async def download_audio(url: str) -> bytes:
+    """
+    Публичная функция: скачивает mp3 по URL и возвращает bytes.
+    """
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise Exception(f"Failed to download audio [{resp.status}]: {url}")
+            return await resp.read()
