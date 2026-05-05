@@ -16,7 +16,7 @@ from services.openai_service import generate_song
 
 logger = logging.getLogger(__name__)
 router = Router()
-
+user_limits = {}
 
 @router.callback_query(SongCreation.details, lambda c: c.data == "lang_ru")
 async def on_lang_selected(callback: CallbackQuery) -> None:
@@ -35,10 +35,12 @@ async def on_own_text(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(SongCreation.details)
 async def on_details_entered(message: Message, state: FSMContext) -> None:
+    print("HANDLER START:", message.from_user.id)
     """
     Пользователь ввёл детали о человеке.
     Запускаем генерацию песни через OpenAI.
 
+    """
     # 🔥 ЛИМИТ В ДЕНЬ
 
     user_id = message.from_user.id
@@ -54,13 +56,13 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         user_limits[user_id] = {"date": today, "count": 0}
 
     if user_limits[user_id]["count"] >= 5:
+        print("LIMIT HIT:", user_id). 
 
         await message.answer("❌ Лимит на сегодня (5 песен) исчерпан. Попробуй завтра 🎵")
 
         return
 
     user_limits[user_id]["count"] += 1
-    """
     user_details = message.text.strip()
 
     if len(user_details) < 5:
