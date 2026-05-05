@@ -10,6 +10,7 @@ from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+
 from states import SongCreation
 from keyboards import get_details_keyboard, get_result_keyboard
 from services.openai_service import generate_song
