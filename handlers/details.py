@@ -4,6 +4,8 @@
 """
 
 import logging
+from datetime import datetime
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -36,6 +38,28 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
     """
     Пользователь ввёл детали о человеке.
     Запускаем генерацию песни через OpenAI.
+
+    # 🔥 ЛИМИТ В ДЕНЬ
+
+    user_id = message.from_user.id
+
+    today = datetime.now().date()
+
+    if user_id not in user_limits:
+
+        user_limits[user_id] = {"date": today, "count": 0}
+
+    if user_limits[user_id]["date"] != today:
+
+        user_limits[user_id] = {"date": today, "count": 0}
+
+    if user_limits[user_id]["count"] >= 5:
+
+        await message.answer("❌ Лимит на сегодня (5 песен) исчерпан. Попробуй завтра 🎵")
+
+        return
+
+    user_limits[user_id]["count"] += 1
     """
     user_details = message.text.strip()
 
