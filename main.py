@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import settings
-from handlers import start, genre, mood, voice, details, editing
+from handlers import start, genre, mood, voice, details, editing, music
 
 # Настройка логирования
 logging.basicConfig(
@@ -28,6 +28,7 @@ def register_all_handlers(dp: Dispatcher) -> None:
     dp.include_router(voice.router)
     dp.include_router(details.router)
     dp.include_router(editing.router)
+    dp.include_router(music.router)   # ← ВОТ ЭТОГО НЕ ХВАТАЛО
 
 
 async def main() -> None:
