@@ -10,7 +10,8 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # Инициализируем клиент один раз при импорте модуля
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+def get_client():
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 # Словари для человекочитаемых названий
 GENRE_LABELS = {
@@ -88,8 +89,10 @@ async def generate_song(
 """
 
     logger.info(f"Генерируем песню: жанр={genre_label}, настроение={mood_label}, голос={voice_label}")
-
     try:
+
+        client = get_client()
+
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -136,6 +139,9 @@ async def edit_song(original_song: str, edit_request: str) -> str:
     logger.info("Редактируем текст песни по запросу пользователя.")
 
     try:
+
+        client = get_client()
+
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[

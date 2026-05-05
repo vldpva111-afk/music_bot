@@ -2,16 +2,21 @@
 Конфигурация бота. Читает переменные окружения из .env файла.
 """
 
-from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
 
+import os
 
-class Settings(BaseSettings):
-    BOT_TOKEN: str
-    OPENAI_API_KEY: str
+load_dotenv("mana.env")  # важно явно указать файл
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+class Settings:
+
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+    MUSIC_API_KEY = os.getenv("MUSIC_API_KEY")
+
+    MUSIC_API_URL = os.getenv("MUSIC_API_URL")
 
 
 settings = Settings()
