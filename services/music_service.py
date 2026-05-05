@@ -58,7 +58,7 @@ async def _create_task(session, text: str):
 
 async def _wait_task(session, task_id: str):
 
-    for _ in range(60):
+    for _ in range(150):
 
         async with session.get(
 
@@ -77,41 +77,33 @@ async def _wait_task(session, task_id: str):
                 raise Exception(data)
 
             if not data.get("data"):
-
-                continue  # просто ждём дальше
+                continue
 
             status = data["data"].get("status")
-            if status == "failed":
+            print("STATUS:", status)
 
+            if status == "failed":
                 raise Exception(f"Music generation failed: {data}")
 
             if status == "complete":
+                songs = data["data"].get("songs") or []
 
-                songs = data["data"].get("songs")
+            if not songs:
+                raise Exception(f"No songs in response: {data}")
 
-                if not songs:
+            song = songs[0]
 
-                    raise Exception(f"No songs in response: {data}")
+            audio_url = (
+                song.get("audioUrl")
+                or song.get("audio_url")
+                or song.get("url")
 
-                song = songs[0]
+    )
 
-                # 🔥 ловим разные варианты ключей
+            if not audio_url:
+                raise Exception(f"No audio url: {song}")
 
-                audio_url = (
-
-                    song.get("audioUrl")
-
-                    or song.get("audio_url")
-
-                    or song.get("url")
-
-                )
-
-                if not audio_url:
-
-                    raise Exception(f"No audio url in song: {song}")
-
-                return audio_url
+            return audio_url
 
         await asyncio.sleep(3)
 
