@@ -33,6 +33,8 @@ async def on_create_song(callback: CallbackQuery, state: FSMContext):
         await state.clear()
 
         audio_bytes = await generate_music_from_text(song_text)
+        logger.info(f"AUDIO TYPE: {type(audio_bytes)}")
+        logger.info(f"AUDIO VALUE: {audio_bytes}")
 
         await callback.bot.send_audio(
 
