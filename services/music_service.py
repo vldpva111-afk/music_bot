@@ -2,9 +2,9 @@ import aiohttp
 import asyncio
 from config import settings
 
-INITIAL_DELAY = 5       # секунд перед первым поллингом
-POLL_INTERVAL = 3       # секунд между запросами
-MAX_ATTEMPTS  = 60      # 60 × 3s = 3 минуты максимум
+INITIAL_DELAY = 5
+POLL_INTERVAL = 3
+MAX_ATTEMPTS  = 60
 
 TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
 
@@ -21,7 +21,7 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
             "instrumental": False,
             "model": "V4_5ALL",
             "prompt": text,
-            "style": style,        # ← теперь параметр, не константа
+            "style": style,
             "title": "AI Song",
             "callBackUrl": "https://example.com/callback",
         },
@@ -39,8 +39,9 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
         return task_id
 
 
-async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
-    await asyncio.sleep(INITIAL_DELAY)  # задача только создана — дать время API
+async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
+    """Возвращает список audio URL (Suno генерирует 2 варианта)."""
+    await asyncio.sleep(INITIAL_DELAY)
 
     for attempt in range(MAX_ATTEMPTS):
         async with session.get(
@@ -54,11 +55,10 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
                 raise Exception(f"Poll failed [{resp.status}]: {data}")
 
             task_data = data.get("data") or {}
-            status = task_data.get("status")
+            status    = task_data.get("status")
             print("STATUS:", status)
 
             if status not in TERMINAL_STATUSES:
-                # pending / processing / queued — продолжаем ждать
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
@@ -67,40 +67,32 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> str:
                 if not songs:
                     raise Exception(f"Status SUCCESS but no sunoData: {data}")
 
-                song = songs[0]
-                audio_url = (
-                    song.get("audioUrl")
-                    or song.get("audio_url")
-                    or song.get("url")
-                )
-                if not audio_url:
-                    raise Exception(f"No audio URL in song object: {song}")
+                urls = []
+                for song in songs:
+                    url = (
+                        song.get("audioUrl")
+                        or song.get("audio_url")
+                        or song.get("url")
+                    )
+                    if url:
+                        urls.append(url)
 
-                return audio_url
+                if not urls:
+                    raise Exception(f"No audio URLs in sunoData: {songs}")
 
-            # status == "failed" или "error"
+                return urls
+
             raise Exception(f"Music generation failed: {data}")
 
     raise TimeoutError(f"Music generation timeout after {MAX_ATTEMPTS * POLL_INTERVAL}s")
 
 
-async def generate_music_from_text(text: str, style: str = "Pop") -> str:
+async def generate_music_from_text(text: str, style: str = "Pop") -> list[str]:
     """
-    Публичная функция: создаёт задачу и ждёт audio_url.
-    Возвращает прямую ссылку на mp3.
-    """
-    async with aiohttp.ClientSession() as session:
-        task_id = await _create_task(session, text, style)
-        audio_url = await _wait_task(session, task_id)
-        return audio_url
-
-
-async def download_audio(url: str) -> bytes:
-    """
-    Публичная функция: скачивает mp3 по URL и возвращает bytes.
+    Создаёт задачу и ждёт результата.
+    Возвращает список прямых ссылок на mp3 (обычно 2 варианта).
     """
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise Exception(f"Failed to download audio [{resp.status}]: {url}")
-            return await resp.read()
+        task_id    = await _create_task(session, text, style)
+        audio_urls = await _wait_task(session, task_id)
+        return audio_urls
