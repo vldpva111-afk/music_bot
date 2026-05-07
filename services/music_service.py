@@ -9,9 +9,9 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-INITIAL_DELAY  = 5
-POLL_INTERVAL  = 3
-MAX_ATTEMPTS   = 15
+INITIAL_DELAY  = 10   # Suno обычно стартует не раньше 10 сек
+POLL_INTERVAL  = 5    # опрашиваем каждые 5 сек
+MAX_ATTEMPTS   = 48   # 48 * 5 = 240 сек (4 минуты)
 
 TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
 
@@ -129,7 +129,9 @@ async def generate_music_from_text(text: str, style: str = "Pop") -> list[str]:
     Создаёт задачу и ждёт результата.
     Возвращает список прямых ссылок на mp3 (обычно 2 варианта).
     """
-    timeout = aiohttp.ClientTimeout(total=settings.MUSIC_TIMEOUT)
+    # connect_timeout — на установку соединения (30 сек)
+    # total=None — не ограничиваем общее время сессии, polling сам управляет длительностью
+    timeout = aiohttp.ClientTimeout(connect=30, total=None)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         task_id    = await _create_task(session, text, style)
         audio_urls = await _wait_task(session, task_id)
