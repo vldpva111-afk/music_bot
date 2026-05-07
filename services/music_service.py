@@ -42,8 +42,12 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
         },
         json=payload,
     ) as resp:
-        data = await resp.json()
+        # content_type=None — не падает если API вернул text/html или другой Content-Type
+        data = await resp.json(content_type=None)
         logger.debug("CREATE TASK response: %s", data)
+
+        if data is None:
+            raise Exception(f"Suno API вернул пустой ответ при создании задачи [{resp.status}]")
 
         if resp.status != 200:
             raise Exception(f"Create task failed [{resp.status}]: {data}")
@@ -67,8 +71,17 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
                 params={"taskId": task_id},
                 headers={"Authorization": f"Bearer {settings.MUSIC_API_KEY}"},
             ) as resp:
-                data = await resp.json()
+                # content_type=None — не падает если API вернул text/html или другой Content-Type
+                data = await resp.json(content_type=None)
                 logger.debug("POLL [attempt %d/%d]: %s", attempt, MAX_ATTEMPTS, data)
+
+                if data is None:
+                    logger.warning(
+                        "Пустой ответ от API на поллинге taskId=%s attempt=%d, повтор через %ds",
+                        task_id, attempt, POLL_INTERVAL,
+                    )
+                    await asyncio.sleep(POLL_INTERVAL)
+                    continue
 
                 if resp.status != 200:
                     raise Exception(f"Poll failed [{resp.status}]: {data}")
@@ -106,7 +119,6 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
         except Exception:
             raise
         finally:
-            # Гарантируем что цикл не зависнет на последней итерации без sleep
             pass
 
     raise TimeoutError(
