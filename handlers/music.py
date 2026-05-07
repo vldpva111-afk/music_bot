@@ -7,7 +7,7 @@ import logging
 import asyncio
 
 from aiogram import Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
@@ -66,31 +66,40 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
     try:
-        audio_urls = await generate_music_from_text(song_text, style=style)
+        # generate_music_from_text теперь возвращает list[bytes]
+        audio_chunks = await generate_music_from_text(song_text, style=style)
 
-        if not audio_urls:
-            raise Exception("No audio URLs from API")
+        if not audio_chunks:
+            raise Exception("No audio data received from API")
 
         if generation_id:
             await mark_music_done(generation_id)
 
-        await loading_msg.delete()
-
-        for i, url in enumerate(audio_urls, start=1):
+        for i, audio_bytes in enumerate(audio_chunks, start=1):
             caption = (
                 "🎉 Твоя персональная песня готова! Слушай прямо здесь 👆"
                 if i == 1
                 else f"🎵 Вариант {i}"
             )
+            audio_file = BufferedInputFile(
+                file=audio_bytes,
+                filename=f"song_variant_{i}.mp3",
+            )
             await callback.bot.send_audio(
                 chat_id=callback.message.chat.id,
-                audio=url,
+                audio=audio_file,
                 title=f"Твоя песня — вариант {i}",
                 performer="ПоздравОК",
                 caption=caption,
             )
 
-        variants_text = "два варианта" if len(audio_urls) > 1 else "один вариант"
+        # Удаляем статус только когда все треки уже отправлены
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+
+        variants_text = "два варианта" if len(audio_chunks) > 1 else "один вариант"
         await callback.bot.send_message(
             chat_id=callback.message.chat.id,
             text=(
@@ -116,7 +125,14 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
         else:
             error_text = "❌ Ошибка при создании музыки. Попробуй ещё раз или напиши /start"
 
-        await loading_msg.edit_text(error_text)
+        try:
+            await loading_msg.edit_text(error_text)
+        except Exception:
+            # Сообщение уже удалено или недоступно — шлём новым
+            await callback.bot.send_message(
+                chat_id=callback.message.chat.id,
+                text=error_text,
+            )
 
     finally:
         # Гарантированно отменяем задачу анимации в любом случае
