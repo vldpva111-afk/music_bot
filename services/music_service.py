@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 INITIAL_DELAY  = 5
 POLL_INTERVAL  = 3
-MAX_ATTEMPTS   = 15   # 15 * 3 = 45 сек — разумный лимит до таймаута Telegram
+MAX_ATTEMPTS   = 15
 
 TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
 
@@ -20,12 +20,12 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
     callback_url = settings.MUSIC_CALLBACK_URL or ""
 
     payload = {
-        "customMode":  True,
+        "customMode":   True,
         "instrumental": False,
-        "model":       settings.MUSIC_MODEL,
-        "prompt":      text,
-        "style":       style,
-        "title":       "AI Song",
+        "model":        settings.MUSIC_MODEL,
+        "prompt":       text,
+        "style":        style,
+        "title":        "AI Song",
     }
     if callback_url:
         payload["callBackUrl"] = callback_url
@@ -38,16 +38,26 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
         },
         json=payload,
     ) as resp:
-        data = await resp.json()
-        logger.debug("Create task response: %s", data)
+        raw = await resp.text()
+        logger.info("CREATE TASK raw response [%d]: %s", resp.status, raw)
+
+        try:
+            data = await resp.json(content_type=None)
+        except Exception as e:
+            raise Exception(f"Failed to parse create task JSON: {e} | raw: {raw}")
 
         if resp.status != 200:
             raise Exception(f"Create task failed [{resp.status}]: {data}")
 
-        task_id = data.get("data", {}).get("taskId")
+        # Пробуем оба варианта структуры ответа
+        task_id = (
+            (data.get("data") or {}).get("taskId")
+            or data.get("taskId")
+        )
         if not task_id:
             raise Exception(f"No taskId in response: {data}")
 
+        logger.info("Task created: taskId=%s", task_id)
         return task_id
 
 
@@ -61,24 +71,36 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
             params={"taskId": task_id},
             headers={"Authorization": f"Bearer {settings.MUSIC_API_KEY}"},
         ) as resp:
-            data = await resp.json()
-            logger.debug("Poll response [attempt %d]: %s", attempt + 1, data)
+            raw = await resp.text()
+            logger.info("POLL raw response [attempt %d, status %d]: %s", attempt + 1, resp.status, raw)
+
+            try:
+                data = await resp.json(content_type=None)
+            except Exception as e:
+                raise Exception(f"Failed to parse poll JSON: {e} | raw: {raw}")
 
             if resp.status != 200:
                 raise Exception(f"Poll failed [{resp.status}]: {data}")
 
+            # Защищаемся от None на каждом уровне
             task_data = data.get("data") or {}
             status    = task_data.get("status")
-            logger.debug("Music task status: %s", status)
+            logger.info("Music task status: %s", status)
 
             if status not in TERMINAL_STATUSES:
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
             if status == "SUCCESS":
-                songs = (task_data.get("response") or {}).get("sunoData") or []
+                response_block = task_data.get("response") or {}
+                songs = response_block.get("sunoData") or []
+
+                # Некоторые версии API кладут треки напрямую в data
                 if not songs:
-                    raise Exception(f"Status SUCCESS but no sunoData: {data}")
+                    songs = task_data.get("sunoData") or []
+
+                if not songs:
+                    raise Exception(f"Status SUCCESS but no sunoData found: {data}")
 
                 urls = []
                 for song in songs:
