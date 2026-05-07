@@ -85,7 +85,8 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.bot.send_audio(
                 chat_id=callback.message.chat.id,
                 audio=url,
-                title=f"🎵 Твоя песня — вариант {i}",
+                title=f"Твоя песня — вариант {i}",
+                performer="ПоздравОК",
                 caption=caption,
             )
 

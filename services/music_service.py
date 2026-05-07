@@ -13,7 +13,7 @@ INITIAL_DELAY  = 10   # Suno обычно стартует не раньше 10 
 POLL_INTERVAL  = 5    # опрашиваем каждые 5 сек
 MAX_ATTEMPTS   = 48   # 48 * 5 = 240 сек (4 минуты)
 
-TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
+TERMINAL_STATUSES = {"SUCCESS", "TEXT_SUCCESS", "failed", "error"}
 
 
 async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "Pop") -> str:
@@ -91,7 +91,7 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
-            if status == "SUCCESS":
+            if status in {"SUCCESS", "TEXT_SUCCESS"}:
                 response_block = task_data.get("response") or {}
                 songs = response_block.get("sunoData") or []
 
@@ -100,13 +100,15 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
                     songs = task_data.get("sunoData") or []
 
                 if not songs:
-                    raise Exception(f"Status SUCCESS but no sunoData found: {data}")
+                    raise Exception(f"Status {status} but no sunoData found: {data}")
 
                 urls = []
                 for song in songs:
                     url = (
-                        song.get("audioUrl")
+                        song.get("audioUrl")        # основной mp3
                         or song.get("audio_url")
+                        or song.get("streamAudioUrl")       # fallback — стриминговый URL
+                        or song.get("sourceStreamAudioUrl") # последний резерв
                         or song.get("url")
                     )
                     if url:
