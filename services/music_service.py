@@ -13,7 +13,7 @@ INITIAL_DELAY  = 10   # Suno обычно стартует не раньше 10 
 POLL_INTERVAL  = 5    # опрашиваем каждые 5 сек
 MAX_ATTEMPTS   = 48   # 48 * 5 = 240 сек (4 минуты)
 
-TERMINAL_STATUSES = {"SUCCESS", "TEXT_SUCCESS", "failed", "error"}
+TERMINAL_STATUSES = {"SUCCESS", "failed", "error"}
 
 
 async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "Pop") -> str:
@@ -49,7 +49,6 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
         if resp.status != 200:
             raise Exception(f"Create task failed [{resp.status}]: {data}")
 
-        # Пробуем оба варианта структуры ответа
         task_id = (
             (data.get("data") or {}).get("taskId")
             or data.get("taskId")
@@ -82,48 +81,44 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[str]:
             if resp.status != 200:
                 raise Exception(f"Poll failed [{resp.status}]: {data}")
 
-            # Защищаемся от None на каждом уровне
             task_data = data.get("data") or {}
             status    = task_data.get("status")
             logger.info("Music task status: %s", status)
 
-            if status not in TERMINAL_STATUSES:
+            # PENDING и другие промежуточные — ждём
+            if status not in TERMINAL_STATUSES and status != "TEXT_SUCCESS":
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
-            if status in {"SUCCESS", "TEXT_SUCCESS"}:
-                response_block = task_data.get("response") or {}
-                songs = response_block.get("sunoData") or []
+            # failed / error — сразу бросаем
+            if status in {"failed", "error"}:
+                raise Exception(f"Music generation failed with status '{status}': {data}")
 
-                # Некоторые версии API кладут треки напрямую в data
-                if not songs:
-                    songs = task_data.get("sunoData") or []
+            # SUCCESS или TEXT_SUCCESS — проверяем наличие аудио URL
+            response_block = task_data.get("response") or {}
+            songs = response_block.get("sunoData") or task_data.get("sunoData") or []
 
-                if not songs:
-                    raise Exception(f"Status {status} but no sunoData found: {data}")
+            urls = []
+            for song in songs:
+                url = (
+                    song.get("audioUrl")
+                    or song.get("audio_url")
+                    or song.get("streamAudioUrl")
+                    or song.get("sourceStreamAudioUrl")
+                    or song.get("url")
+                )
+                if url:
+                    urls.append(url)
 
-                urls = []
-                for song in songs:
-                    url = (
-                        song.get("audioUrl")        # основной mp3
-                        or song.get("audio_url")
-                        or song.get("streamAudioUrl")       # fallback — стриминговый URL
-                        or song.get("sourceStreamAudioUrl") # последний резерв
-                        or song.get("url")
-                    )
-                    if url:
-                        urls.append(url)
-
-                if not urls:
-                    raise Exception(f"No audio URLs in sunoData: {songs}")
-
+            if urls:
+                logger.info("Got %d audio URLs at status '%s'", len(urls), status)
                 return urls
 
-            raise Exception(f"Music generation failed with status '{status}': {data}")
+            # Аудио ещё рендерится — продолжаем polling
+            logger.info("Status '%s' but no audio URLs yet, waiting...", status)
+            await asyncio.sleep(POLL_INTERVAL)
 
-    raise TimeoutError(
-        f"Music generation timeout after {MAX_ATTEMPTS * POLL_INTERVAL}s"
-    )
+    raise TimeoutError(f"Music generation timeout after {MAX_ATTEMPTS * POLL_INTERVAL}s")
 
 
 async def generate_music_from_text(text: str, style: str = "Pop") -> list[str]:
@@ -131,8 +126,6 @@ async def generate_music_from_text(text: str, style: str = "Pop") -> list[str]:
     Создаёт задачу и ждёт результата.
     Возвращает список прямых ссылок на mp3 (обычно 2 варианта).
     """
-    # connect_timeout — на установку соединения (30 сек)
-    # total=None — не ограничиваем общее время сессии, polling сам управляет длительностью
     timeout = aiohttp.ClientTimeout(connect=30, total=None)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         task_id    = await _create_task(session, text, style)
