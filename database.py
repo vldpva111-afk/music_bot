@@ -116,17 +116,18 @@ async def try_log_generation(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # Блокируем строки пользователя за сегодня — FOR UPDATE не даёт
-            # параллельному запросу пройти до коммита этой транзакции
-            row = await conn.fetchrow("""
-                SELECT COUNT(*) AS cnt
+            # Блокируем строки пользователя за сегодня — SELECT id (без агрегата),
+            # FOR UPDATE с COUNT(*) PostgreSQL не поддерживает
+            rows = await conn.fetch("""
+                SELECT id
                 FROM generations
                 WHERE telegram_id = $1
                   AND created_at >= CURRENT_DATE::TIMESTAMPTZ
                 FOR UPDATE;
             """, telegram_id)
 
-            if row["cnt"] >= daily_limit:
+            # Считаем в Python — атомарность сохранена, race condition исключён
+            if len(rows) >= daily_limit:
                 return None
 
             new_row = await conn.fetchrow("""

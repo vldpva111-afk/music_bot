@@ -7,6 +7,7 @@ import logging
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 from states import SongCreation
 from keyboards import get_details_keyboard, get_result_keyboard
@@ -39,7 +40,11 @@ async def on_lang_selected(callback: CallbackQuery, state: FSMContext) -> None:
 
     label = LANG_LABELS[lang]
     await callback.answer(f"✅ Язык выбран: {label}", show_alert=False)
-    await callback.message.edit_reply_markup(reply_markup=get_details_keyboard(lang))
+    try:
+        await callback.message.edit_reply_markup(reply_markup=get_details_keyboard(lang))
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
 
 
 # ── Свой текст ─────────────────────────────────────────────────────────────────
