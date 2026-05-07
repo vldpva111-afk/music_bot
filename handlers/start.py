@@ -3,20 +3,22 @@
 """
 
 import logging
+
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
+from aiogram.fsm.state import default_state
 from aiogram.types import Message, CallbackQuery, URLInputFile
 from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
 from keyboards import get_start_keyboard, get_genre_keyboard
+from database import upsert_user
+from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-# Тематическая картинка (музыка / подарок). Можно заменить на свою,
-# положив файл рядом и используя FSInputFile, или вставив другой URL.
-WELCOME_IMAGE_URL = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&q=80"
+WELCOME_IMAGE_URL = settings.WELCOME_IMAGE_URL
 
 WELCOME_TEXT = (
     "🎁 <b>Привет! Я ПоздравОК</b>\n\n"
@@ -36,6 +38,13 @@ WELCOME_TEXT = (
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
 
+    user = message.from_user
+    await upsert_user(
+        telegram_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+    )
+
     try:
         await message.answer_photo(
             photo=URLInputFile(WELCOME_IMAGE_URL),
@@ -44,20 +53,25 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             reply_markup=get_start_keyboard(),
         )
     except Exception:
-        # Если картинка недоступна — отправляем просто текст
         await message.answer(
             WELCOME_TEXT,
             parse_mode="HTML",
             reply_markup=get_start_keyboard(),
         )
 
-    await state.set_state(SongCreation.start)
-    logger.info(f"Пользователь {message.from_user.id} запустил бота.")
+    logger.info("Пользователь %d запустил бота.", user.id)
 
 
-@router.callback_query(lambda c: c.data == "create_song")
+@router.callback_query(
+    StateFilter(default_state, SongCreation.genre),
+    lambda c: c.data == "create_song",
+)
 async def on_create_song(callback: CallbackQuery, state: FSMContext) -> None:
-    """Кнопка «Начать» / «Создать новую песню» — переходим к жанру."""
+    """
+    Кнопка «Начать» / «Создать новую песню».
+    Принимается только из начального состояния или со шага выбора жанра —
+    чтобы не сбрасывать FSM посередине уже начатого флоу.
+    """
     await state.clear()
 
     await callback.message.answer(
@@ -66,4 +80,4 @@ async def on_create_song(callback: CallbackQuery, state: FSMContext) -> None:
     )
     await state.set_state(SongCreation.genre)
     await callback.answer()
-    logger.info(f"Пользователь {callback.from_user.id} начал создание песни.")
+    logger.info("Пользователь %d начал создание песни.", callback.from_user.id)

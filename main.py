@@ -11,7 +11,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 
 from config import settings
 from database import get_pool, close_pool
-from handlers import start, genre, mood, voice, details, editing, music
+from handlers import start, genre, mood, voice, details, editing, music, cancel, stats
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def register_all_handlers(dp: Dispatcher) -> None:
+    # cancel и stats регистрируем первыми — работают в любом состоянии
+    dp.include_router(cancel.router)
+    dp.include_router(stats.router)
     dp.include_router(start.router)
     dp.include_router(genre.router)
     dp.include_router(mood.router)
@@ -31,17 +34,17 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
 
 async def main() -> None:
+    # Валидируем конфиг сразу — лучше упасть здесь, чем на первом запросе
+    settings.validate()
+
     logger.info("Запуск бота...")
 
-    # ── Redis FSM storage ──────────────────────────────────────────────────────
     storage = RedisStorage.from_url(settings.REDIS_URL)
-
-    bot = Bot(token=settings.BOT_TOKEN)
-    dp  = Dispatcher(storage=storage)
+    bot     = Bot(token=settings.BOT_TOKEN)
+    dp      = Dispatcher(storage=storage)
 
     register_all_handlers(dp)
 
-    # ── Прогрев пула БД при старте ─────────────────────────────────────────────
     await get_pool()
 
     await bot.delete_webhook(drop_pending_updates=True)

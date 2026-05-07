@@ -24,16 +24,14 @@ async def on_mood_selected(callback: CallbackQuery, state: FSMContext) -> None:
     genre_label = GENRE_LABELS.get(data.get("genre", ""), "")
     mood_label  = MOOD_LABELS[mood]
 
-    await callback.message.answer(
-        f"🎵 <b>Жанр песни:</b> {genre_label}\n"
-        f"🎭 <b>Настроение:</b> {mood_label}",
-        parse_mode="HTML",
-    )
-    await callback.message.answer(
+    await callback.message.edit_text(
+        f"🎵 <b>Жанр:</b> {genre_label}\n"
+        f"🎭 <b>Настроение:</b> {mood_label}\n\n"
         "🎤 Каким голосом ты хочешь песню?",
+        parse_mode="HTML",
         reply_markup=get_voice_keyboard(),
     )
 
     await state.set_state(SongCreation.voice)
     await callback.answer()
-    logger.info(f"Пользователь {callback.from_user.id} выбрал настроение: {mood}")
+    logger.info("Пользователь %d выбрал настроение: %s", callback.from_user.id, mood)

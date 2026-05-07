@@ -6,9 +6,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class SongCreation(StatesGroup):
-    # Пользователь видит приветствие — ожидаем нажатия "Создать песню"
-    start = State()
-
     # Ожидаем выбора жанра
     genre = State()
 
@@ -21,5 +18,5 @@ class SongCreation(StatesGroup):
     # Ожидаем ввода деталей о человеке
     details = State()
 
-    # Ожидаем правок к уже сгенерированном тексте песни
+    # Ожидаем действия с готовым текстом (правки или генерация музыки)
     editing = State()

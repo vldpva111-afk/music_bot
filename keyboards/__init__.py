@@ -5,6 +5,7 @@ from .keyboards import (
     get_voice_keyboard,
     get_details_keyboard,
     get_result_keyboard,
+    get_done_keyboard,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "get_voice_keyboard",
     "get_details_keyboard",
     "get_result_keyboard",
+    "get_done_keyboard",
 ]

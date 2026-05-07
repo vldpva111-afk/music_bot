@@ -38,18 +38,16 @@ async def on_voice_selected(callback: CallbackQuery, state: FSMContext) -> None:
     mood_label  = MOOD_LABELS.get(data.get("mood", ""), "")
     voice_label = VOICE_LABELS[voice]
 
-    await callback.message.answer(
-        f"🎵 <b>Жанр песни:</b> {genre_label}\n"
+    # Редактируем текущее сообщение — показываем итоговое резюме выбора
+    await callback.message.edit_text(
+        f"🎵 <b>Жанр:</b> {genre_label}\n"
         f"🎭 <b>Настроение:</b> {mood_label}\n"
-        f"🎤 <b>Голос:</b> {voice_label}",
-        parse_mode="HTML",
-    )
-    await callback.message.answer(
-        DETAILS_TEXT,
+        f"🎤 <b>Голос:</b> {voice_label}\n\n"
+        f"{DETAILS_TEXT}",
         parse_mode="HTML",
         reply_markup=get_details_keyboard("ru"),
     )
 
     await state.set_state(SongCreation.details)
     await callback.answer()
-    logger.info(f"Пользователь {callback.from_user.id} выбрал голос: {voice}")
+    logger.info("Пользователь %d выбрал голос: %s", callback.from_user.id, voice)

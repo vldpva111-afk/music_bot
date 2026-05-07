@@ -3,13 +3,16 @@
 Передаёт жанр, настроение и голос как параметры стиля.
 """
 
-import logging
 import asyncio
+import logging
 
+import aiohttp
 from aiogram import Router
-from aiogram.types import CallbackQuery
+from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from states import SongCreation
+from keyboards import get_done_keyboard
 from services.music_service import generate_music_from_text
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
 from database import mark_music_done
@@ -26,7 +29,7 @@ PROGRESS_MESSAGES = [
 ]
 
 
-@router.callback_query(lambda c: c.data == "make_music")
+@router.callback_query(SongCreation.editing, lambda c: c.data == "make_music")
 async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
@@ -47,65 +50,58 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
 
     style = ", ".join([
         GENRE_STYLE.get(genre, "Pop"),
-        MOOD_STYLE.get(mood, "upbeat"),
+        MOOD_STYLE.get(mood,   "upbeat"),
         VOICE_STYLE.get(voice, "male vocals"),
     ])
 
-    logger.info(f"Генерация музыки для {callback.from_user.id}: style={style}")
+    logger.info("Генерация музыки для %d: style=%s", callback.from_user.id, style)
 
     loading_msg   = await callback.message.answer(PROGRESS_MESSAGES[0])
-    progress_task = asyncio.create_task(
-        _animate_progress(loading_msg, PROGRESS_MESSAGES)
-    )
+    progress_task = asyncio.create_task(_animate_progress(loading_msg, PROGRESS_MESSAGES))
 
     try:
-        # Получаем список URL — Suno генерирует 2 варианта
         audio_urls = await generate_music_from_text(song_text, style=style)
 
         if not audio_urls:
             raise Exception("No audio URLs from API")
 
         progress_task.cancel()
-        try:
-            await progress_task
-        except asyncio.CancelledError:
-            pass
+        await _suppress_cancelled(progress_task)
 
         if generation_id:
             await mark_music_done(generation_id)
 
         await loading_msg.delete()
 
-        # Отправляем по прямому URL — Telegram сам скачивает, без таймаута
-        for i, url in enumerate(audio_urls, start=1):
-            caption = (
-                "🎉 Твоя персональная песня готова! Слушай прямо здесь 👆"
-                if i == 1
-                else f"🎵 Вариант {i}"
-            )
-            await callback.bot.send_audio(
-                chat_id=callback.message.chat.id,
-                audio=url,
-                title=f"🎵 Твоя песня — вариант {i}",
-                caption=caption,
-            )
+        async with aiohttp.ClientSession() as session:
+            for i, url in enumerate(audio_urls, start=1):
+                caption = (
+                    "🎉 Твоя персональная песня готова! Слушай прямо здесь 👆"
+                    if i == 1
+                    else f"🎵 Вариант {i}"
+                )
+                async with session.get(url) as resp:
+                    audio_bytes = await resp.read()
 
+                await callback.bot.send_audio(
+                    chat_id=callback.message.chat.id,
+                    audio=BufferedInputFile(audio_bytes, filename=f"Твоя песня №{i}.mp3"),
+                    title=f"Твоя песня №{i}",
+                    caption=caption,
+                )
+
+        variants_text = "два варианта" if len(audio_urls) > 1 else "один вариант"
         await callback.bot.send_message(
             chat_id=callback.message.chat.id,
-            text=(
-                f"🎊 Готово! Для тебя {'два варианта' if len(audio_urls) > 1 else 'один вариант'} — выбери лучший.\n\n"
-                "Хочешь создать ещё одну песню? Нажми /start 🎵"
-            ),
+            text=f"🎊 Готово! Для тебя {variants_text} — выбери лучший.",
+            reply_markup=get_done_keyboard(),
         )
 
     except Exception as e:
         progress_task.cancel()
-        try:
-            await progress_task
-        except asyncio.CancelledError:
-            pass
+        await _suppress_cancelled(progress_task)
 
-        logger.error(f"Ошибка генерации музыки для {callback.from_user.id}: {e}")
+        logger.error("Ошибка генерации музыки для %d: %s", callback.from_user.id, e)
 
         if "insufficient_credits" in str(e):
             await loading_msg.edit_text(
@@ -128,5 +124,13 @@ async def _animate_progress(msg, messages: list) -> None:
             except Exception:
                 pass
             idx += 1
+    except asyncio.CancelledError:
+        pass
+
+
+async def _suppress_cancelled(task: asyncio.Task) -> None:
+    """Ждёт завершения задачи, подавляя CancelledError."""
+    try:
+        await task
     except asyncio.CancelledError:
         pass

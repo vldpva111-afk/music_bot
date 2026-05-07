@@ -1,6 +1,5 @@
 """
 Хэндлер выбора жанра.
-После выбора показывает резюме и предлагает выбрать настроение.
 """
 
 import logging
@@ -23,12 +22,15 @@ async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
 
     label = GENRE_LABELS[genre]
 
-    await callback.message.answer(f"🎵 <b>Жанр песни:</b> {label}", parse_mode="HTML")
-    await callback.message.answer(
+    # Редактируем исходное сообщение с клавиатурой вместо отправки нового —
+    # чат не засоряется промежуточными резюме на каждом шаге
+    await callback.message.edit_text(
+        f"🎵 <b>Жанр:</b> {label}\n\n"
         "😊 Теперь выбери настроение твоей будущей песни:",
+        parse_mode="HTML",
         reply_markup=get_mood_keyboard(),
     )
 
     await state.set_state(SongCreation.mood)
     await callback.answer()
-    logger.info(f"Пользователь {callback.from_user.id} выбрал жанр: {genre}")
+    logger.info("Пользователь %d выбрал жанр: %s", callback.from_user.id, genre)

@@ -1,11 +1,14 @@
 """
 Клавиатуры бота. Все inline кнопки хранятся здесь централизованно.
+Тексты кнопок берутся из constants.py — единственного источника правды.
 """
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_LABELS
 
-# ── Старт ────────────────────────────────────────────────────────────────────
+
+# ── Старт ─────────────────────────────────────────────────────────────────────
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -17,12 +20,8 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
 
 def get_genre_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎤 Рэп/хип-хоп",  callback_data="genre_rap")],
-        [InlineKeyboardButton(text="🎶 Поп",           callback_data="genre_pop")],
-        [InlineKeyboardButton(text="🎸 Рок",           callback_data="genre_rock")],
-        [InlineKeyboardButton(text="🎻 Шансон",        callback_data="genre_chanson")],
-        [InlineKeyboardButton(text="🕺 Диско 80-х",    callback_data="genre_disco")],
-        [InlineKeyboardButton(text="🎼 Классика",      callback_data="genre_classic")],
+        [InlineKeyboardButton(text=label, callback_data=key)]
+        for key, label in GENRE_LABELS.items()
     ])
 
 
@@ -30,10 +29,8 @@ def get_genre_keyboard() -> InlineKeyboardMarkup:
 
 def get_mood_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="😄 Радостное",  callback_data="mood_happy")],
-        [InlineKeyboardButton(text="😢 Грустное",   callback_data="mood_sad")],
-        [InlineKeyboardButton(text="😌 Спокойное",  callback_data="mood_calm")],
-        [InlineKeyboardButton(text="❤️ Любовное",   callback_data="mood_love")],
+        [InlineKeyboardButton(text=label, callback_data=key)]
+        for key, label in MOOD_LABELS.items()
     ])
 
 
@@ -41,41 +38,40 @@ def get_mood_keyboard() -> InlineKeyboardMarkup:
 
 def get_voice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👨 Мужским",  callback_data="voice_male")],
-        [InlineKeyboardButton(text="👩 Женским",  callback_data="voice_female")],
+        [InlineKeyboardButton(text=label, callback_data=key)]
+        for key, label in VOICE_LABELS.items()
     ])
 
 
 # ── Детали: язык + свой текст ─────────────────────────────────────────────────
 
+# Короткие метки для языковой строки — умещаются в одну строку
+_LANG_SHORT: dict[str, str] = {
+    "ru": "🇷🇺 Рус",
+    "kz": "🇰🇿 Каз",
+    "tt": "🇷🇺 Тат",
+    "uz": "🇺🇿 Узб",
+    "en": "🇬🇧 Eng",
+}
+
+
 def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     """
-    Показывает кнопку выбора языка (с раскрытием) и кнопку 'Свой текст'.
+    Показывает текущий выбранный язык, строку быстрого переключения и кнопку 'Свой текст'.
     lang — текущий выбранный язык ('ru', 'kz', 'tt', 'uz', 'en').
     """
-    lang_labels = {
-        "ru": "🇷🇺 Русский",
-        "kz": "🇰🇿 Казакша",
-        "tt": "🇷🇺 Татарча",
-        "uz": "🇺🇿 Озбекча",
-        "en": "🇬🇧 English",
-    }
-    # Основная кнопка языка — показывает текущий выбор
-    selected_label = lang_labels.get(lang, "🇷🇺 Русский")
+    selected_label = LANG_LABELS.get(lang, LANG_LABELS["ru"])
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        # Кнопка-заголовок (открывает варианты)
+        # Информационная строка с текущим языком (не кликабельна по сути, но показывает выбор)
         [InlineKeyboardButton(
-            text=f"🌍 Язык песни: {selected_label}",
-            callback_data="lang_menu"
+            text=f"🌍 Язык: {selected_label}",
+            callback_data="lang_menu",
         )],
-        # Языки всегда видны — одна строка
+        # Быстрое переключение языка
         [
-            InlineKeyboardButton(text="🇷🇺 Рус",  callback_data="lang_ru"),
-            InlineKeyboardButton(text="🇰🇿 Каз",  callback_data="lang_kz"),
-            InlineKeyboardButton(text="🇷🇺 Тат",  callback_data="lang_tt"),
-            InlineKeyboardButton(text="🇺🇿 Узб",  callback_data="lang_uz"),
-            InlineKeyboardButton(text="🇬🇧 Eng",  callback_data="lang_en"),
+            InlineKeyboardButton(text=short, callback_data=f"lang_{code}")
+            for code, short in _LANG_SHORT.items()
         ],
         [InlineKeyboardButton(text="✍️ У меня есть готовый текст", callback_data="own_text")],
     ])
@@ -87,4 +83,12 @@ def get_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Создать песню",  callback_data="make_music")],
         [InlineKeyboardButton(text="✏️ Внести правки",  callback_data="edit_song")],
+    ])
+
+
+# ── После получения музыки ────────────────────────────────────────────────────
+
+def get_done_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎵 Создать новую песню", callback_data="create_song")],
     ])
