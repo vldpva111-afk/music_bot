@@ -86,13 +86,15 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
     # try_log_generation делает SELECT FOR UPDATE + INSERT в одной транзакции,
     # исключая race condition при параллельных запросах с разных устройств.
     # Возвращает id записи или None если лимит исчерпан.
+    is_admin = user_id in settings.ADMIN_IDS
+
     generation_id = await try_log_generation(
         telegram_id=user_id,
         genre=genre, mood=mood, voice=voice, lang=lang,
-        daily_limit=settings.FREE_DAILY_LIMIT,
+        daily_limit=settings.FREE_DAILY_LIMIT if not is_admin else 999999,
     )
 
-    if generation_id is None:
+    if generation_id is None and not is_admin:
         await message.answer(
             f"❌ Лимит на сегодня ({settings.FREE_DAILY_LIMIT} песни) исчерпан.\n"
             "Попробуй завтра 🎵"
@@ -125,10 +127,12 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await state.set_state(SongCreation.editing)
         await loading_msg.delete()
 
-        remaining_text = (
-            f"\n\n<i>Осталось генераций сегодня: {remaining}</i>" if remaining > 0
-            else "\n\n<i>Это была последняя бесплатная генерация на сегодня 🎵</i>"
-        )
+        remaining_text = ""
+        if not is_admin:
+            remaining_text = (
+                f"\n\n<i>Осталось генераций сегодня: {remaining}</i>" if remaining > 0
+                else "\n\n<i>Это была последняя бесплатная генерация на сегодня 🎵</i>"
+            )
 
         await message.answer(
             "🎵 <b>Вот твой текст песни!</b>\n\n"
