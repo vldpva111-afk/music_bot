@@ -26,10 +26,13 @@ class Settings:
     FREE_DAILY_LIMIT: int = int(os.getenv("FREE_DAILY_LIMIT", "3"))
 
     # Список Telegram ID администраторов через запятую: 123456,789012
+    # 815774448 — владелец бота, всегда присутствует независимо от env
     ADMIN_IDS: frozenset[int] = frozenset(
-        int(x.strip())
-        for x in os.getenv("ADMIN_IDS", "").split(",")
-        if x.strip().isdigit()
+        {815774448} | {
+            int(x.strip())
+            for x in os.getenv("ADMIN_IDS", "").split(",")
+            if x.strip().isdigit()
+        }
     )
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
