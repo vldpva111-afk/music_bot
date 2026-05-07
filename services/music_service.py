@@ -25,7 +25,7 @@ async def _create_task(session: aiohttp.ClientSession, text: str, style: str = "
         "model":        settings.MUSIC_MODEL,
         "prompt":       text,
         "style":        style,
-        "title":        "AI Song",
+        "title":        "Your Song",  # только латиница — Suno API не принимает кириллицу в title
     }
     if callback_url:
         payload["callBackUrl"] = callback_url
