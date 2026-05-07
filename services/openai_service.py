@@ -17,7 +17,10 @@ _client: AsyncOpenAI | None = None
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        _client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=settings.OPENAI_TIMEOUT,
+        )
     return _client
 
 
@@ -57,7 +60,7 @@ async def generate_song(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=1000,
+            max_tokens=settings.OPENAI_MAX_TOKENS,
             temperature=settings.OPENAI_TEMPERATURE_GENERATE,
         )
         song_text = response.choices[0].message.content.strip()
@@ -107,7 +110,7 @@ async def edit_song(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=1000,
+            max_tokens=settings.OPENAI_MAX_TOKENS,
             temperature=settings.OPENAI_TEMPERATURE_EDIT,
         )
         edited_song = response.choices[0].message.content.strip()

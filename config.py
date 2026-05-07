@@ -26,13 +26,11 @@ class Settings:
     FREE_DAILY_LIMIT: int = int(os.getenv("FREE_DAILY_LIMIT", "3"))
 
     # Список Telegram ID администраторов через запятую: 123456,789012
-    # 815774448 — владелец бота, всегда присутствует независимо от env
+    # Задаётся исключительно через переменную окружения ADMIN_IDS
     ADMIN_IDS: frozenset[int] = frozenset(
-        {815774448} | {
-            int(x.strip())
-            for x in os.getenv("ADMIN_IDS", "").split(",")
-            if x.strip().isdigit()
-        }
+        int(x.strip())
+        for x in os.getenv("ADMIN_IDS", "").split(",")
+        if x.strip().isdigit()
     )
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
@@ -40,9 +38,12 @@ class Settings:
     OPENAI_MODEL: str                  = os.getenv("OPENAI_MODEL", "gpt-4o")
     OPENAI_TEMPERATURE_GENERATE: float = float(os.getenv("OPENAI_TEMPERATURE_GENERATE", "0.85"))
     OPENAI_TEMPERATURE_EDIT: float     = float(os.getenv("OPENAI_TEMPERATURE_EDIT", "0.75"))
+    OPENAI_MAX_TOKENS: int             = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+    OPENAI_TIMEOUT: float              = float(os.getenv("OPENAI_TIMEOUT", "60.0"))
 
     # ── Suno / Music API ──────────────────────────────────────────────────────
-    MUSIC_MODEL: str = os.getenv("MUSIC_MODEL", "V4_5ALL")
+    MUSIC_MODEL: str    = os.getenv("MUSIC_MODEL", "V4_5ALL")
+    MUSIC_TIMEOUT: float = float(os.getenv("MUSIC_TIMEOUT", "30.0"))
 
     # ── Приветственное изображение ────────────────────────────────────────────
     WELCOME_IMAGE_URL: str = os.getenv(
@@ -63,6 +64,12 @@ class Settings:
             raise EnvironmentError(
                 f"Отсутствуют обязательные переменные окружения: {', '.join(missing)}\n"
                 f"Проверь файл {_env_file}"
+            )
+
+        if not self.ADMIN_IDS:
+            raise EnvironmentError(
+                "Переменная ADMIN_IDS не задана или пуста.\n"
+                "Укажи хотя бы один Telegram ID администратора: ADMIN_IDS=123456789"
             )
 
 

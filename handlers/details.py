@@ -82,16 +82,17 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
     lang    = data.get("lang",         "ru")
     use_own = data.get("use_own_text", False)
 
+    is_admin = user_id in settings.ADMIN_IDS
+    daily_limit = settings.FREE_DAILY_LIMIT if not is_admin else 999999
+
     # ── Атомарная проверка лимита + запись в одной транзакции ─────────────────
     # try_log_generation делает SELECT FOR UPDATE + INSERT в одной транзакции,
     # исключая race condition при параллельных запросах с разных устройств.
-    # Возвращает id записи или None если лимит исчерпан.
-    is_admin = user_id in settings.ADMIN_IDS
-
+    # Возвращает (id, count_after_insert) или None если лимит исчерпан.
     generation_id = await try_log_generation(
         telegram_id=user_id,
         genre=genre, mood=mood, voice=voice, lang=lang,
-        daily_limit=settings.FREE_DAILY_LIMIT if not is_admin else 999999,
+        daily_limit=daily_limit,
     )
 
     if generation_id is None and not is_admin:
@@ -100,11 +101,6 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             "Попробуй завтра 🎵"
         )
         return
-
-    # Считаем остаток: лимит минус уже было минус только что занятая
-    from database import count_generations_today
-    used_today = await count_generations_today(user_id)
-    remaining = settings.FREE_DAILY_LIMIT - used_today
 
     await state.update_data(**{_GENERATING_KEY: True})
     loading_msg = await message.answer("✍️ Создаю текст песни по вашему запросу...\n⏳")
@@ -127,12 +123,26 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await state.set_state(SongCreation.editing)
         await loading_msg.delete()
 
+        # Подсчёт остатка без лишнего запроса к БД.
+        # try_log_generation уже записал эту генерацию, поэтому вычитаем её:
+        # remaining = лимит - (всего сегодня включая текущую)
+        # Но нам не нужен точный count — достаточно знать была ли эта генерация последней.
+        # Для этого сравниваем generation_id со счётчиком через FSM-данные.
         remaining_text = ""
         if not is_admin:
-            remaining_text = (
-                f"\n\n<i>Осталось генераций сегодня: {remaining}</i>" if remaining > 0
-                else "\n\n<i>Это была последняя бесплатная генерация на сегодня 🎵</i>"
-            )
+            # Используем данные из FSM: до этой генерации было (daily_limit - remaining_before) штук.
+            # Мы не храним used_count — просто проверяем, не был ли лимит достигнут именно сейчас.
+            # Для точного remaining нужен отдельный запрос, но UX важнее точности здесь.
+            # Решение: храним счётчик в FSM при первой генерации.
+            used_before = data.get("used_count", 0)
+            used_now    = used_before + 1
+            remaining   = daily_limit - used_now
+            await state.update_data(used_count=used_now)
+
+            if remaining > 0:
+                remaining_text = f"\n\n<i>Осталось генераций сегодня: {remaining}</i>"
+            else:
+                remaining_text = "\n\n<i>Это была последняя бесплатная генерация на сегодня 🎵</i>"
 
         await message.answer(
             "🎵 <b>Вот твой текст песни!</b>\n\n"

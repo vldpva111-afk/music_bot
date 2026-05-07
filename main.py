@@ -8,6 +8,8 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import ErrorEvent
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from config import settings
 from database import get_pool, close_pool
@@ -44,6 +46,29 @@ async def main() -> None:
     dp      = Dispatcher(storage=storage)
 
     register_all_handlers(dp)
+
+    # ── Глобальный обработчик ошибок ──────────────────────────────────────────
+    @dp.errors()
+    async def global_error_handler(event: ErrorEvent) -> bool:
+        exc = event.exception
+
+        if isinstance(exc, TelegramForbiddenError):
+            # Пользователь заблокировал бота — логируем и молча пропускаем
+            logger.warning("Бот заблокирован пользователем: %s", exc)
+            return True
+
+        if isinstance(exc, TelegramBadRequest):
+            # Устаревшее сообщение, нельзя редактировать и т.п. — не критично
+            logger.warning("TelegramBadRequest (проигнорировано): %s", exc)
+            return True
+
+        # Всё остальное — логируем как ошибку с полным traceback
+        logger.error(
+            "Необработанное исключение в хэндлере: %s",
+            exc,
+            exc_info=True,
+        )
+        return False   # False = aiogram не глушит исключение, оно пойдёт дальше
 
     await get_pool()
 
