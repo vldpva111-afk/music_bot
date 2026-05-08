@@ -18,12 +18,12 @@ from handlers import start, genre, mood, voice, details, editing, music, cancel,
 
 # Команды, которые видны пользователю в выпадающем меню Telegram (рядом с "/")
 USER_COMMANDS = [
-    BotCommand(command="start",   description="Перезапустить бота"),
-    BotCommand(command="menu",    description="Главное меню"),
-    BotCommand(command="invite",  description="Пригласить друга"),
-    BotCommand(command="balance", description="Мой баланс"),
-    BotCommand(command="cancel",  description="Отменить текущее действие"),
-    BotCommand(command="help",    description="Помощь"),
+    BotCommand(command="start",   description="🎵 Перезапустить бота"),
+    BotCommand(command="menu",    description="🏠 Главное меню"),
+    BotCommand(command="invite",  description="🎁 Получить бонус"),
+    BotCommand(command="balance", description="💰 Мои баланс"),
+    BotCommand(command="cancel",  description="❌ Отменить текущее действие"),
+    BotCommand(command="help",    description="❓ Помощь"),
 ]
 
 logging.basicConfig(
