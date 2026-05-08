@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
-from keyboards import get_mood_keyboard
+from keyboards import get_mood_keyboard, get_genre_keyboard
 from constants import GENRE_LABELS, VALID_GENRES
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,6 @@ async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
 
     label = GENRE_LABELS[genre]
 
-    # Редактируем исходное сообщение с клавиатурой вместо отправки нового —
-    # чат не засоряется промежуточными резюме на каждом шаге
     await callback.message.edit_text(
         f"🎵 <b>Жанр:</b> {label}\n\n"
         "😊 Теперь выбери настроение твоей будущей песни:",
@@ -34,3 +32,16 @@ async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SongCreation.mood)
     await callback.answer()
     logger.info("Пользователь %d выбрал жанр: %s", callback.from_user.id, genre)
+
+
+# ── Назад: настроение → жанр ──────────────────────────────────────────────────
+
+@router.callback_query(SongCreation.mood, lambda c: c.data == "back_to_genre")
+async def on_back_to_genre(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(SongCreation.genre)
+    await callback.message.edit_text(
+        "🎼 Выбери жанр для своей песни:",
+        reply_markup=get_genre_keyboard(),
+    )
+    await callback.answer()
+    logger.info("Пользователь %d вернулся к выбору жанра.", callback.from_user.id)

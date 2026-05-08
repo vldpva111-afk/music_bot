@@ -31,6 +31,8 @@ def get_mood_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data=key)]
         for key, label in MOOD_LABELS.items()
+    ] + [
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_genre")]
     ])
 
 
@@ -40,6 +42,8 @@ def get_voice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data=key)]
         for key, label in VOICE_LABELS.items()
+    ] + [
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_mood")]
     ])
 
 
@@ -63,7 +67,7 @@ def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     selected_label = LANG_LABELS.get(lang, LANG_LABELS["ru"])
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        # Информационная строка с текущим языком (не кликабельна по сути, но показывает выбор)
+        # Информационная строка с текущим языком
         [InlineKeyboardButton(
             text=f"🌍 Язык: {selected_label}",
             callback_data="lang_menu",
@@ -74,6 +78,7 @@ def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
             for code, short in _LANG_SHORT.items()
         ],
         [InlineKeyboardButton(text="✍️ У меня есть готовый текст", callback_data="own_text")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_voice")],
     ])
 
 
@@ -81,8 +86,9 @@ def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
 
 def get_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Создать песню",  callback_data="make_music")],
-        [InlineKeyboardButton(text="✏️ Внести правки",  callback_data="edit_song")],
+        [InlineKeyboardButton(text="🎵 Создать песню",   callback_data="make_music")],
+        [InlineKeyboardButton(text="✏️ Внести правки",   callback_data="edit_song")],
+        [InlineKeyboardButton(text="🔄 Сгенерировать заново", callback_data="regenerate_song")],
     ])
 
 
@@ -91,4 +97,13 @@ def get_result_keyboard() -> InlineKeyboardMarkup:
 def get_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Создать новую песню", callback_data="create_song")],
+    ])
+
+
+# ── Во время ожидания правок ──────────────────────────────────────────────────
+
+def get_cancel_edit_keyboard() -> InlineKeyboardMarkup:
+    """Показывается пока бот ждёт текст правок — позволяет отменить."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")],
     ])

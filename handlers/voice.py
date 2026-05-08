@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
-from keyboards import get_details_keyboard
+from keyboards import get_details_keyboard, get_voice_keyboard
 from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, VALID_VOICES
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,6 @@ async def on_voice_selected(callback: CallbackQuery, state: FSMContext) -> None:
     mood_label  = MOOD_LABELS.get(data.get("mood", ""), "")
     voice_label = VOICE_LABELS[voice]
 
-    # Редактируем текущее сообщение — показываем итоговое резюме выбора
     await callback.message.edit_text(
         f"🎵 <b>Жанр:</b> {genre_label}\n"
         f"🎭 <b>Настроение:</b> {mood_label}\n"
@@ -51,3 +50,23 @@ async def on_voice_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SongCreation.details)
     await callback.answer()
     logger.info("Пользователь %d выбрал голос: %s", callback.from_user.id, voice)
+
+
+# ── Назад: детали → голос ────────────────────────────────────────────────────
+
+@router.callback_query(SongCreation.details, lambda c: c.data == "back_to_voice")
+async def on_back_to_voice(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    genre_label = GENRE_LABELS.get(data.get("genre", ""), "")
+    mood_label  = MOOD_LABELS.get(data.get("mood", ""), "")
+
+    await state.set_state(SongCreation.voice)
+    await callback.message.edit_text(
+        f"🎵 <b>Жанр:</b> {genre_label}\n"
+        f"🎭 <b>Настроение:</b> {mood_label}\n\n"
+        "🎤 Каким голосом ты хочешь песню?",
+        parse_mode="HTML",
+        reply_markup=get_voice_keyboard(),
+    )
+    await callback.answer()
+    logger.info("Пользователь %d вернулся к выбору голоса.", callback.from_user.id)
