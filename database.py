@@ -97,12 +97,14 @@ async def upsert_user(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # COALESCE — не затираем сохранённые username/first_name, если
+        # в текущем апдейте Telegram прислал NULL (юзер скрыл username и т.п.)
         row = await conn.fetchrow("""
             INSERT INTO users (telegram_id, username, first_name, referred_by)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (telegram_id) DO UPDATE
-                SET username   = EXCLUDED.username,
-                    first_name = EXCLUDED.first_name
+                SET username   = COALESCE(EXCLUDED.username,   users.username),
+                    first_name = COALESCE(EXCLUDED.first_name, users.first_name)
             RETURNING (xmax = 0) AS is_new;
         """, telegram_id, username, first_name, referred_by)
         return row["is_new"]
@@ -219,37 +221,6 @@ async def get_credits_info(telegram_id: int) -> dict:
             "free_available": not row["free_used"],
             "bonus_credits":  row["bonus_credits"],
         }
-
-
-# ── Устаревшие функции (оставлены для обратной совместимости) ─────────────────
-
-async def try_log_generation(
-    telegram_id: int,
-    genre: str,
-    mood: str,
-    voice: str,
-    lang: str,
-    daily_limit: int,
-) -> int | None:
-    """
-    Устарело — используй try_consume_and_log.
-    Оставлено чтобы не сломать другие части кода до их обновления.
-    """
-    result = await try_consume_and_log(telegram_id, genre, mood, voice, lang)
-    return result[0] if result else None
-
-
-async def count_generations_today(telegram_id: int) -> int:
-    """Возвращает количество генераций пользователя за сегодня (по UTC)."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT COUNT(*) AS cnt
-            FROM generations
-            WHERE telegram_id = $1
-              AND created_at >= CURRENT_DATE::TIMESTAMPTZ;
-        """, telegram_id)
-        return row["cnt"]
 
 
 async def log_generation(

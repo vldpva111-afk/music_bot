@@ -8,11 +8,19 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_LABELS
 
 
-# ── Старт ─────────────────────────────────────────────────────────────────────
+# ── Старт / Главное меню ──────────────────────────────────────────────────────
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
+    """Алиас главного меню — оставлен для совместимости вызовов в /start."""
+    return get_main_menu_keyboard()
+
+
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Главное меню: создание песни, реферальная ссылка, баланс."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Начать", callback_data="create_song")]
+        [InlineKeyboardButton(text="🎵 Новая песня",     callback_data="create_song")],
+        [InlineKeyboardButton(text="💌 Пригласить друга", callback_data="show_invite")],
+        [InlineKeyboardButton(text="💎 Мой баланс",       callback_data="show_balance")],
     ])
 
 
@@ -95,9 +103,8 @@ def get_result_keyboard() -> InlineKeyboardMarkup:
 # ── После получения музыки ────────────────────────────────────────────────────
 
 def get_done_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Создать новую песню", callback_data="create_song")],
-    ])
+    """После готовой музыки показываем главное меню — все варианты под рукой."""
+    return get_main_menu_keyboard()
 
 
 # ── Во время ожидания правок ──────────────────────────────────────────────────

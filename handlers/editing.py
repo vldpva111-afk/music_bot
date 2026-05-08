@@ -8,7 +8,7 @@
 
 import logging
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -57,7 +57,7 @@ async def on_cancel_edit(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ── Получаем текст правок ─────────────────────────────────────────────────────
 
-@router.message(SongCreation.awaiting_edit)
+@router.message(SongCreation.awaiting_edit, F.text)
 async def on_edit_text_received(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
 
@@ -161,3 +161,13 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
         await loading_msg.edit_text(
             "😔 Ошибка при генерации. Попробуй ещё раз 👇",
         )
+
+
+# Фоллбэк для не-текстовых сообщений в режиме ожидания правок
+@router.message(SongCreation.awaiting_edit)
+async def on_edit_non_text(message: Message) -> None:
+    await message.answer(
+        "Пожалуйста, опиши правки <b>текстом</b> 📝",
+        parse_mode="HTML",
+        reply_markup=get_cancel_edit_keyboard(),
+    )

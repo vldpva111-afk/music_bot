@@ -22,9 +22,6 @@ class Settings:
     DATABASE_URL        = os.getenv("DATABASE_URL")          # PostgreSQL
     REDIS_URL           = os.getenv("REDIS_URL")             # Redis
 
-    # Максимум бесплатных генераций в день
-    FREE_DAILY_LIMIT: int = int(os.getenv("FREE_DAILY_LIMIT", "3"))
-
     # Список Telegram ID администраторов через запятую: 123456,789012
     # Задаётся исключительно через переменную окружения ADMIN_IDS
     ADMIN_IDS: frozenset[int] = frozenset(

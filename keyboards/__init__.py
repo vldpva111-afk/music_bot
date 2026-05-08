@@ -1,5 +1,6 @@
 from .keyboards import (
     get_start_keyboard,
+    get_main_menu_keyboard,
     get_genre_keyboard,
     get_mood_keyboard,
     get_voice_keyboard,
@@ -11,6 +12,7 @@ from .keyboards import (
 
 __all__ = [
     "get_start_keyboard",
+    "get_main_menu_keyboard",
     "get_genre_keyboard",
     "get_mood_keyboard",
     "get_voice_keyboard",

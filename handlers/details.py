@@ -4,7 +4,7 @@
 
 import logging
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
@@ -14,7 +14,7 @@ from keyboards import get_details_keyboard, get_result_keyboard
 from services.openai_service import generate_song
 from constants import LANG_LABELS, VALID_LANGS
 from config import settings
-from database import try_log_generation
+from database import try_consume_and_log, log_generation, get_credits_info
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -61,7 +61,49 @@ async def on_own_text(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ── Ввод деталей / текста ──────────────────────────────────────────────────────
 
-@router.message(SongCreation.details)
+async def _build_no_credits_text(message: Message) -> str:
+    """Сообщение когда у пользователя кончились кредиты — со ссылкой-приглашением."""
+    user_id = message.from_user.id
+    try:
+        me = await message.bot.me()
+        ref_link = f"https://t.me/{me.username}?start=ref_{user_id}"
+    except Exception:
+        # На случай если bot.me() упадёт — отдадим сообщение без ссылки
+        ref_link = None
+
+    text = (
+        "❌ У тебя закончились бесплатные генерации.\n\n"
+        "Получи <b>+1 бонусный кредит</b> за каждого друга, "
+        "который зарегистрируется по твоей ссылке 🎵"
+    )
+    if ref_link:
+        text += f"\n\n<b>Твоя ссылка:</b>\n<code>{ref_link}</code>"
+    return text
+
+
+def _format_remaining(credit_type: str, free_available: bool, bonus_credits: int) -> str:
+    """Текст про остаток кредитов после успешной генерации."""
+    parts = []
+    if credit_type == "free":
+        parts.append("🎁 Использована приветственная генерация")
+    elif credit_type == "bonus":
+        parts.append("⭐ Использован бонусный кредит")
+
+    remain = []
+    if free_available:
+        remain.append("🎁 приветственная: 1")
+    if bonus_credits > 0:
+        remain.append(f"⭐ бонусных: {bonus_credits}")
+
+    if remain:
+        parts.append("Осталось — " + ", ".join(remain))
+    else:
+        parts.append("Это была твоя последняя бесплатная генерация 🎵")
+
+    return "\n\n<i>" + "\n".join(parts) + "</i>"
+
+
+@router.message(SongCreation.details, F.text)
 async def on_details_entered(message: Message, state: FSMContext) -> None:
     user_id = message.from_user.id
 
@@ -83,31 +125,35 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
     use_own = data.get("use_own_text", False)
 
     is_admin = user_id in settings.ADMIN_IDS
-    daily_limit = settings.FREE_DAILY_LIMIT if not is_admin else 999999
 
-    # ── Атомарная проверка лимита + запись в одной транзакции ─────────────────
-    # try_log_generation делает SELECT FOR UPDATE + INSERT в одной транзакции,
-    # исключая race condition при параллельных запросах с разных устройств.
-    # Возвращает (id, count_after_insert) или None если лимит исчерпан.
-    generation_id = await try_log_generation(
-        telegram_id=user_id,
-        genre=genre, mood=mood, voice=voice, lang=lang,
-        daily_limit=daily_limit,
-    )
-
-    if generation_id is None and not is_admin:
-        await message.answer(
-            f"❌ Лимит на сегодня ({settings.FREE_DAILY_LIMIT} песни) исчерпан.\n"
-            "Попробуй завтра 🎵"
+    # ── Списание кредита + запись генерации ───────────────────────────────────
+    # Для админов — безлимит: пишем в журнал без списания.
+    # Для остальных — try_consume_and_log делает FOR UPDATE + UPDATE + INSERT
+    # в одной транзакции. Возвращает (id, credit_type) или None если кредитов нет.
+    if is_admin:
+        generation_id = await log_generation(
+            telegram_id=user_id, genre=genre, mood=mood, voice=voice, lang=lang,
         )
-        return
+        credit_type = "admin"
+    else:
+        result = await try_consume_and_log(
+            telegram_id=user_id, genre=genre, mood=mood, voice=voice, lang=lang,
+        )
+        if result is None:
+            await message.answer(
+                await _build_no_credits_text(message),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            return
+        generation_id, credit_type = result
 
     await state.update_data(**{_GENERATING_KEY: True})
     loading_msg = await message.answer("✍️ Создаю текст песни по вашему запросу...\n⏳")
 
     logger.info(
-        "Генерация для %d: жанр=%s, настроение=%s, голос=%s, язык=%s",
-        user_id, genre, mood, voice, lang,
+        "Генерация для %d: жанр=%s, настроение=%s, голос=%s, язык=%s, credit=%s",
+        user_id, genre, mood, voice, lang, credit_type,
     )
 
     try:
@@ -124,26 +170,15 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await state.set_state(SongCreation.editing)
         await loading_msg.delete()
 
-        # Подсчёт остатка без лишнего запроса к БД.
-        # try_log_generation уже записал эту генерацию, поэтому вычитаем её:
-        # remaining = лимит - (всего сегодня включая текущую)
-        # Но нам не нужен точный count — достаточно знать была ли эта генерация последней.
-        # Для этого сравниваем generation_id со счётчиком через FSM-данные.
+        # Считаем остаток после списания — отдельный запрос, но он лёгкий
         remaining_text = ""
         if not is_admin:
-            # Используем данные из FSM: до этой генерации было (daily_limit - remaining_before) штук.
-            # Мы не храним used_count — просто проверяем, не был ли лимит достигнут именно сейчас.
-            # Для точного remaining нужен отдельный запрос, но UX важнее точности здесь.
-            # Решение: храним счётчик в FSM при первой генерации.
-            used_before = data.get("used_count", 0)
-            used_now    = used_before + 1
-            remaining   = daily_limit - used_now
-            await state.update_data(used_count=used_now)
-
-            if remaining > 0:
-                remaining_text = f"\n\n<i>Осталось генераций сегодня: {remaining}</i>"
-            else:
-                remaining_text = "\n\n<i>Это была последняя бесплатная генерация на сегодня 🎵</i>"
+            credits = await get_credits_info(user_id)
+            remaining_text = _format_remaining(
+                credit_type=credit_type,
+                free_available=credits["free_available"],
+                bonus_credits=credits["bonus_credits"],
+            )
 
         await message.answer(
             "🎵 <b>Вот твой текст песни!</b>\n\n"
@@ -162,3 +197,13 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await loading_msg.edit_text(
             "😔 Произошла ошибка при генерации. Попробуй ещё раз — напиши детали заново."
         )
+
+
+# Фоллбэк для не-текстовых сообщений (фото, стикеры, голос и т.п.)
+# Должен идти после основного хэндлера — иначе перехватит всё.
+@router.message(SongCreation.details)
+async def on_details_non_text(message: Message) -> None:
+    await message.answer(
+        "Пожалуйста, отправь описание <b>текстом</b> 📝",
+        parse_mode="HTML",
+    )

@@ -8,12 +8,23 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import ErrorEvent
+from aiogram.types import ErrorEvent, BotCommand, BotCommandScopeDefault
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from config import settings
 from database import get_pool, close_pool
 from handlers import start, genre, mood, voice, details, editing, music, cancel, stats
+
+
+# Команды, которые видны пользователю в выпадающем меню Telegram (рядом с "/")
+USER_COMMANDS = [
+    BotCommand(command="start",   description="Перезапустить бота"),
+    BotCommand(command="menu",    description="Главное меню"),
+    BotCommand(command="invite",  description="Пригласить друга"),
+    BotCommand(command="balance", description="Мой баланс"),
+    BotCommand(command="cancel",  description="Отменить текущее действие"),
+    BotCommand(command="help",    description="Помощь"),
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,6 +84,8 @@ async def main() -> None:
     await get_pool()
 
     await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_my_commands(USER_COMMANDS, scope=BotCommandScopeDefault())
+    logger.info("Команды бота зарегистрированы в Telegram.")
     logger.info("Бот запущен. Начинаем polling...")
 
     try:

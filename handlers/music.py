@@ -30,23 +30,37 @@ PROGRESS_MESSAGES = [
 PROGRESS_INTERVAL = 15  # секунд между обновлениями прогресса
 
 
+_MAKING_MUSIC_KEY = "is_making_music"
+
+
 @router.callback_query(SongCreation.editing, lambda c: c.data == "make_music")
 async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-
     if not callback.message:
+        await callback.answer()
         return
 
-    data          = await state.get_data()
+    # ── Защита от двойного клика ──────────────────────────────────────────────
+    # aiogram обрабатывает апдейты конкурентно, поэтому два быстрых клика могут
+    # оба пройти фильтр SongCreation.editing до того, как первый успеет
+    # переключить состояние. Дополнительный флаг в FSM закрывает гонку.
+    data = await state.get_data()
+    if data.get(_MAKING_MUSIC_KEY):
+        await callback.answer("⏳ Уже создаю музыку, подожди...", show_alert=False)
+        return
+
+    # Сразу проставляем флаг и меняем состояние — оба пишутся в Redis,
+    # последующие клики либо увидят флаг, либо не пройдут фильтр editing.
+    await state.update_data(**{_MAKING_MUSIC_KEY: True})
+    await state.set_state(SongCreation.music)
+    await callback.answer()
+
     song_text     = data.get("current_song")
     generation_id = data.get("generation_id")
 
     if not song_text:
+        await state.update_data(**{_MAKING_MUSIC_KEY: False})
         await callback.message.answer("❌ Не найден текст песни. Начни сначала — /start")
         return
-
-    # Переводим в состояние music — блокирует повторное нажатие и правки
-    await state.set_state(SongCreation.music)
 
     genre = data.get("genre", "genre_pop")
     mood  = data.get("mood",  "mood_happy")
@@ -116,6 +130,7 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
 
         # Возвращаем в editing — пользователь может попробовать снова
         await state.set_state(SongCreation.editing)
+        await state.update_data(**{_MAKING_MUSIC_KEY: False})
 
         if "insufficient_credits" in str(e):
             error_text = (
