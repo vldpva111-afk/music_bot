@@ -62,9 +62,9 @@ VALID_VOICES: frozenset[str] = frozenset(VOICE_LABELS)
 
 LANG_LABELS: dict[str, str] = {
     "ru": "🇷🇺 Русский",
-    "kz": "🇰🇿 Казакша",
+    "kz": "🇰🇿 Қазақша",
     "tt": "🇷🇺 Татарча",
-    "uz": "🇺🇿 Озбекча",
+    "uz": "🇺🇿 Oʻzbekcha",
     "en": "🇬🇧 English",
 }
 

@@ -118,6 +118,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await state.update_data(
             current_song=song_text,
             generation_id=generation_id,
+            last_details=user_details,
             **{_GENERATING_KEY: False},
         )
         await state.set_state(SongCreation.editing)
