@@ -52,9 +52,9 @@ def get_voice_keyboard() -> InlineKeyboardMarkup:
 # Короткие метки для языковой строки — умещаются в одну строку
 _LANG_SHORT: dict[str, str] = {
     "ru": "🇷🇺 Рус",
-    "kz": "🇰🇿 Каз",
+    "kz": "🇰🇿 Қаз",
     "tt": "🇷🇺 Тат",
-    "uz": "🇺🇿 Узб",
+    "uz": "🇺🇿 Ўзб",
     "en": "🇬🇧 Eng",
 }
 
