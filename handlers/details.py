@@ -82,12 +82,12 @@ async def _build_no_credits_text(message: Message) -> str:
 
 
 def _format_remaining(credit_type: str, free_available: bool, bonus_credits: int) -> str:
-    """Текст про остаток кредитов после успешной генерации."""
+    """Текст про остаток кредитов после успешной генерации (отдельным сообщением)."""
     parts = []
     if credit_type == "free":
-        parts.append("🎁 Использована приветственная генерация")
+        parts.append("🎁 <b>Использована приветственная генерация</b>")
     elif credit_type == "bonus":
-        parts.append("⭐ Использован бонусный кредит")
+        parts.append("⭐ <b>Использован бонусный кредит</b>")
 
     remain = []
     if free_available:
@@ -100,7 +100,7 @@ def _format_remaining(credit_type: str, free_available: bool, bonus_credits: int
     else:
         parts.append("Это была твоя последняя бесплатная генерация 🎵")
 
-    return "\n\n<i>" + "\n".join(parts) + "</i>"
+    return "\n".join(parts)
 
 
 @router.message(SongCreation.details, F.text)
@@ -170,8 +170,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
         await state.set_state(SongCreation.editing)
         await loading_msg.delete()
 
-        # Считаем остаток после списания — отдельный запрос, но он лёгкий
-        remaining_text = ""
+        # Сначала — отдельное сообщение про списание и остаток кредитов
         if not is_admin:
             credits = await get_credits_info(user_id)
             remaining_text = _format_remaining(
@@ -179,13 +178,14 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
                 free_available=credits["free_available"],
                 bonus_credits=credits["bonus_credits"],
             )
+            await message.answer(remaining_text, parse_mode="HTML")
 
+        # Затем — сам текст песни с клавиатурой (кнопки на самом свежем сообщении)
         await message.answer(
             "🎵 <b>Вот твой текст песни!</b>\n\n"
             "Если хочешь что-то исправить — нажми «Внести правки».\n"
             "Если всё нравится — нажми «Создать песню» 🎧\n\n"
-            f"{song_text}"
-            f"{remaining_text}",
+            f"{song_text}",
             parse_mode="HTML",
             reply_markup=get_result_keyboard(),
         )

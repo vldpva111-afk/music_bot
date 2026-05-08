@@ -139,6 +139,39 @@ async def get_bonus_credits(telegram_id: int) -> int:
         return row["bonus_credits"] if row else 0
 
 
+# ── Админские операции ────────────────────────────────────────────────────────
+
+async def admin_add_bonus_credits(telegram_id: int, amount: int) -> int | None:
+    """
+    Начисляет N бонусных кредитов пользователю. Используется админом —
+    лимит MAX_REFERRAL_BONUS не применяется.
+    Возвращает новый баланс или None если пользователя нет в БД.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE users
+            SET bonus_credits = bonus_credits + $2
+            WHERE telegram_id = $1
+            RETURNING bonus_credits;
+        """, telegram_id, amount)
+        return row["bonus_credits"] if row else None
+
+
+async def find_user_by_username(username: str) -> int | None:
+    """
+    Ищет telegram_id пользователя по username (регистронезависимо, без '@').
+    Возвращает None если такого пользователя нет в БД.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT telegram_id FROM users
+            WHERE LOWER(username) = LOWER($1);
+        """, username)
+        return row["telegram_id"] if row else None
+
+
 # ── Кредитная логика генерации ────────────────────────────────────────────────
 
 async def try_consume_and_log(
