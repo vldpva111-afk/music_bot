@@ -12,7 +12,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from states import SongCreation
 from keyboards import get_start_keyboard, get_genre_keyboard
-from database import upsert_user, apply_referral_bonus, MAX_REFERRAL_BONUS
+from database import upsert_user, apply_referral_bonus, MAX_REFERRAL_BONUS, log_event, Events
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,11 @@ async def cmd_start(
         )
 
     logger.info("Пользователь %d запустил бота.", user.id)
+    await log_event(
+        user.id,
+        Events.BOT_STARTED,
+        {"is_new": is_new, "referrer": referrer_id},
+    )
 
 
 @router.callback_query(lambda c: c.data == "create_song")
@@ -121,6 +126,7 @@ async def on_create_song(callback: CallbackQuery, state: FSMContext) -> None:
     т.к. начало нового флоу всегда сбрасывает FSM.
     """
     await state.clear()
+    await log_event(callback.from_user.id, Events.FLOW_STARTED)
 
     await callback.message.answer(
         "🎼 Отлично! Давай выберем, в каком жанре будет звучать твоя песня:",

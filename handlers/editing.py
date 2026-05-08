@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from states import SongCreation
 from keyboards import get_result_keyboard, get_cancel_edit_keyboard
 from services.openai_service import edit_song, generate_song
+from database import log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -28,6 +29,7 @@ _EDITING_KEY = "is_editing"
 async def on_edit_requested(callback: CallbackQuery, state: FSMContext) -> None:
     """Переводим в состояние ожидания правок — теперь любое сообщение = правки."""
     await state.set_state(SongCreation.awaiting_edit)
+    await log_event(callback.from_user.id, Events.EDIT_REQUESTED)
     await callback.message.answer(
         "✏️ Напиши, что хочешь изменить в песне:\n\n"
         "<i>Например: «сделай припев веселее», «добавь упоминание котика», «убери слово»</i>",
@@ -99,6 +101,7 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
             reply_markup=get_result_keyboard(),
         )
         logger.info("Правки внесены для %d.", message.from_user.id)
+        await log_event(message.from_user.id, Events.EDIT_APPLIED)
 
     except Exception as e:
         logger.error("Ошибка правок для %d: %s", message.from_user.id, e)
@@ -135,6 +138,7 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
+    await log_event(callback.from_user.id, Events.REGENERATE_CLICKED)
     await state.update_data(**{_EDITING_KEY: True})
     await callback.answer()
     loading_msg = await callback.message.answer("🔄 Генерирую новый вариант песни...")

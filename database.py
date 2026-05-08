@@ -3,6 +3,7 @@
 Создаёт таблицы при первом запуске (если не существуют).
 """
 
+import json
 import logging
 import asyncpg
 from config import settings
@@ -67,6 +68,25 @@ async def _create_tables(pool: asyncpg.Pool) -> None:
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_generations_user_date
             ON generations (telegram_id, created_at);
+        """)
+
+        # ── Журнал событий для воронки конверсии ──────────────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS event_log (
+                id          BIGSERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                event       TEXT NOT NULL,
+                metadata    JSONB,
+                ts          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_event_log_event_ts
+            ON event_log (event, ts DESC);
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_event_log_user_ts
+            ON event_log (telegram_id, ts DESC);
         """)
 
         # Миграция: добавляем новые колонки если таблица уже существовала
@@ -337,3 +357,103 @@ async def get_stats() -> dict:
             "conversion_pct":          row["conversion_pct"] or 0,
             "avg_per_user":            row["avg_per_user"] or 0,
         }
+
+
+# ── Журнал событий (воронка) ──────────────────────────────────────────────────
+
+class Events:
+    """
+    Имена событий воронки. Использовать константы, а не строки —
+    чтобы IDE подсвечивала опечатки и было где видеть полный список.
+    Порядок объявления = порядок шагов воронки.
+    """
+    BOT_STARTED          = "bot_started"            # /start
+    FLOW_STARTED         = "flow_started"           # клик «🎵 Новая песня»
+    GENRE_SELECTED       = "genre_selected"
+    MOOD_SELECTED        = "mood_selected"
+    VOICE_SELECTED       = "voice_selected"
+    LANG_SELECTED        = "lang_selected"
+    DETAILS_SUBMITTED    = "details_submitted"      # пользователь прислал текст
+    NO_CREDITS_SHOWN     = "no_credits_shown"       # упёрся в кредиты
+    TEXT_GENERATED       = "text_generated"         # успех генерации текста
+    TEXT_FAILED          = "text_failed"
+    EDIT_REQUESTED       = "edit_requested"         # клик «Внести правки»
+    EDIT_APPLIED         = "edit_applied"
+    REGENERATE_CLICKED   = "regenerate_clicked"
+    MUSIC_STARTED        = "music_started"          # клик «Создать песню»
+    MUSIC_DELIVERED      = "music_delivered"        # музыка отправлена
+    MUSIC_FAILED         = "music_failed"
+
+
+# Шаги воронки в порядке прохождения — для отчёта /funnel.
+# Если хочешь добавить шаг — допиши в Events и сюда.
+FUNNEL_STEPS = [
+    Events.BOT_STARTED,
+    Events.FLOW_STARTED,
+    Events.GENRE_SELECTED,
+    Events.MOOD_SELECTED,
+    Events.VOICE_SELECTED,
+    Events.DETAILS_SUBMITTED,
+    Events.TEXT_GENERATED,
+    Events.MUSIC_STARTED,
+    Events.MUSIC_DELIVERED,
+]
+
+
+async def log_event(
+    telegram_id: int,
+    event: str,
+    metadata: dict | None = None,
+) -> None:
+    """
+    Пишет событие воронки. Best-effort: ошибки логируются, но не пробрасываются —
+    падение БД не должно ломать пользовательский UX.
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO event_log (telegram_id, event, metadata) "
+                "VALUES ($1, $2, $3::jsonb);",
+                telegram_id,
+                event,
+                json.dumps(metadata) if metadata else None,
+            )
+    except Exception as e:
+        logger.warning(
+            "log_event failed (event=%s, user=%d): %s",
+            event, telegram_id, e,
+        )
+
+
+async def get_funnel_stats(period_days: int = 7) -> list[dict]:
+    """
+    Возвращает воронку за последние N дней:
+      [{step, users_count, pct_from_start, pct_from_prev}, ...]
+    users_count — уникальные пользователи, дошедшие до шага.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT event, COUNT(DISTINCT telegram_id) AS users_count
+            FROM event_log
+            WHERE ts >= NOW() - ($1 || ' days')::INTERVAL
+              AND event = ANY($2::text[])
+            GROUP BY event;
+        """, str(period_days), FUNNEL_STEPS)
+
+    counts = {r["event"]: r["users_count"] for r in rows}
+    base = counts.get(FUNNEL_STEPS[0], 0)
+
+    result = []
+    prev = base
+    for step in FUNNEL_STEPS:
+        n = counts.get(step, 0)
+        result.append({
+            "step":           step,
+            "users_count":    n,
+            "pct_from_start": round(100.0 * n / base, 1) if base else 0.0,
+            "pct_from_prev":  round(100.0 * n / prev, 1) if prev else 0.0,
+        })
+        prev = n if n > 0 else prev
+    return result

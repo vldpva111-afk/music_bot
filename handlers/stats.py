@@ -14,9 +14,24 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from config import settings
 from database import (
     get_stats,
+    get_funnel_stats,
     admin_add_bonus_credits,
     find_user_by_username,
 )
+
+
+# Человекочитаемые подписи шагов воронки для отчёта /funnel
+FUNNEL_LABELS = {
+    "bot_started":        "Запустил бота",
+    "flow_started":       "Нажал «Новая песня»",
+    "genre_selected":     "Выбрал жанр",
+    "mood_selected":      "Выбрал настроение",
+    "voice_selected":     "Выбрал голос",
+    "details_submitted":  "Отправил детали",
+    "text_generated":     "Получил текст",
+    "music_started":      "Нажал «Создать песню»",
+    "music_delivered":    "Получил музыку",
+}
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -161,3 +176,52 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
             "(возможно, заблокировал бота).</i>",
             parse_mode="HTML",
         )
+
+
+# ── /funnel — воронка конверсии ───────────────────────────────────────────────
+
+@router.message(Command("funnel"))
+async def cmd_funnel(message: Message, command: CommandObject) -> None:
+    """
+    Показывает воронку конверсии за N дней.
+    Использование:
+        /funnel        — за 7 дней
+        /funnel 30     — за 30 дней
+        /funnel 1      — за сутки
+    """
+    if message.from_user.id not in settings.ADMIN_IDS:
+        return
+
+    period = 7
+    arg = (command.args or "").strip()
+    if arg:
+        if not arg.isdigit() or not (1 <= int(arg) <= 365):
+            await message.answer("Период должен быть числом дней от 1 до 365.")
+            return
+        period = int(arg)
+
+    funnel = await get_funnel_stats(period_days=period)
+
+    lines = [f"📉 <b>Воронка за {period} дн.</b>\n"]
+    if funnel and funnel[0]["users_count"] == 0:
+        lines.append("<i>Нет данных за выбранный период.</i>")
+    else:
+        for i, step in enumerate(funnel):
+            label = FUNNEL_LABELS.get(step["step"], step["step"])
+            n = step["users_count"]
+            from_start = step["pct_from_start"]
+            from_prev = step["pct_from_prev"]
+
+            # Первый шаг — базовая когорта, проценты не показываем
+            if i == 0:
+                lines.append(f"<b>{n}</b>  · {label}")
+            else:
+                drop = 100 - from_prev if from_prev else 0
+                drop_marker = "" if drop < 5 else f"  ⚠️ -{drop:.0f}%"
+                lines.append(
+                    f"<b>{n}</b>  ({from_start}% от старта, "
+                    f"{from_prev}% от пред.)  · {label}{drop_marker}"
+                )
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+    logger.info("Воронка запрошена админом %d за %d дней.", message.from_user.id, period)

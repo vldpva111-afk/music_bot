@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from states import SongCreation
 from keyboards import get_voice_keyboard, get_mood_keyboard
 from constants import GENRE_LABELS, MOOD_LABELS, VALID_MOODS
+from database import log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -35,6 +36,7 @@ async def on_mood_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SongCreation.voice)
     await callback.answer()
     logger.info("Пользователь %d выбрал настроение: %s", callback.from_user.id, mood)
+    await log_event(callback.from_user.id, Events.MOOD_SELECTED, {"mood": mood})
 
 
 # ── Назад: голос → настроение ─────────────────────────────────────────────────

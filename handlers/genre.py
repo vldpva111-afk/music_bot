@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from states import SongCreation
 from keyboards import get_mood_keyboard, get_genre_keyboard
 from constants import GENRE_LABELS, VALID_GENRES
+from database import log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -32,6 +33,7 @@ async def on_genre_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SongCreation.mood)
     await callback.answer()
     logger.info("Пользователь %d выбрал жанр: %s", callback.from_user.id, genre)
+    await log_event(callback.from_user.id, Events.GENRE_SELECTED, {"genre": genre})
 
 
 # ── Назад: настроение → жанр ──────────────────────────────────────────────────

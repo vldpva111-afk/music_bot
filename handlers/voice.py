@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from states import SongCreation
 from keyboards import get_details_keyboard, get_voice_keyboard
 from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, VALID_VOICES
+from database import log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -50,6 +51,7 @@ async def on_voice_selected(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SongCreation.details)
     await callback.answer()
     logger.info("Пользователь %d выбрал голос: %s", callback.from_user.id, voice)
+    await log_event(callback.from_user.id, Events.VOICE_SELECTED, {"voice": voice})
 
 
 # ── Назад: детали → голос ────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ from keyboards import get_details_keyboard, get_result_keyboard
 from services.openai_service import generate_song
 from constants import LANG_LABELS, VALID_LANGS
 from config import settings
-from database import try_consume_and_log, log_generation, get_credits_info
+from database import try_consume_and_log, log_generation, get_credits_info, log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -37,6 +37,7 @@ async def on_lang_menu(callback: CallbackQuery) -> None:
 async def on_lang_selected(callback: CallbackQuery, state: FSMContext) -> None:
     lang = callback.data.split("_", 1)[1]   # 'lang_kz' → 'kz'
     await state.update_data(lang=lang)
+    await log_event(callback.from_user.id, Events.LANG_SELECTED, {"lang": lang})
 
     label = LANG_LABELS[lang]
     await callback.answer(f"✅ Язык выбран: {label}", show_alert=False)
@@ -140,6 +141,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             telegram_id=user_id, genre=genre, mood=mood, voice=voice, lang=lang,
         )
         if result is None:
+            await log_event(user_id, Events.NO_CREDITS_SHOWN)
             await message.answer(
                 await _build_no_credits_text(message),
                 parse_mode="HTML",
@@ -147,6 +149,16 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             )
             return
         generation_id, credit_type = result
+
+    await log_event(
+        user_id,
+        Events.DETAILS_SUBMITTED,
+        {
+            "genre": genre, "mood": mood, "voice": voice, "lang": lang,
+            "use_own_text": use_own, "credit_type": credit_type,
+            "details_len": len(user_details),
+        },
+    )
 
     await state.update_data(**{_GENERATING_KEY: True})
     loading_msg = await message.answer("✍️ Создаю текст песни по вашему запросу...\n⏳")
@@ -190,10 +202,16 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             reply_markup=get_result_keyboard(),
         )
         logger.info("Текст сгенерирован для %d, generation_id=%d.", user_id, generation_id)
+        await log_event(
+            user_id,
+            Events.TEXT_GENERATED,
+            {"generation_id": generation_id, "credit_type": credit_type},
+        )
 
     except Exception as e:
         logger.error("Ошибка генерации для %d: %s", user_id, e)
         await state.update_data(**{_GENERATING_KEY: False})
+        await log_event(user_id, Events.TEXT_FAILED, {"error": str(e)[:200]})
         await loading_msg.edit_text(
             "😔 Произошла ошибка при генерации. Попробуй ещё раз — напиши детали заново."
         )

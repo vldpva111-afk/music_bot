@@ -14,7 +14,7 @@ from states import SongCreation
 from keyboards import get_done_keyboard
 from services.music_service import generate_music_from_text
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
-from database import mark_music_done
+from database import mark_music_done, log_event, Events
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -53,6 +53,7 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(**{_MAKING_MUSIC_KEY: True})
     await state.set_state(SongCreation.music)
     await callback.answer()
+    await log_event(callback.from_user.id, Events.MUSIC_STARTED)
 
     song_text     = data.get("current_song")
     generation_id = data.get("generation_id")
@@ -123,10 +124,20 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=get_done_keyboard(),
         )
 
+        await log_event(
+            callback.from_user.id,
+            Events.MUSIC_DELIVERED,
+            {"generation_id": generation_id, "variants": len(audio_chunks)},
+        )
         await state.clear()
 
     except Exception as e:
         logger.error("Ошибка генерации музыки для %s: %s", callback.from_user.id, e)
+        await log_event(
+            callback.from_user.id,
+            Events.MUSIC_FAILED,
+            {"generation_id": generation_id, "error": str(e)[:200]},
+        )
 
         # Возвращаем в editing — пользователь может попробовать снова
         await state.set_state(SongCreation.editing)
