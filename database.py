@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
 
+# Максимум реферальных бонусов на одного пользователя
+MAX_REFERRAL_BONUS = 5
+
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
@@ -37,11 +40,14 @@ async def _create_tables(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id          BIGSERIAL PRIMARY KEY,
-                telegram_id BIGINT UNIQUE NOT NULL,
-                username    TEXT,
-                first_name  TEXT,
-                created_at  TIMESTAMPTZ DEFAULT NOW()
+                id             BIGSERIAL PRIMARY KEY,
+                telegram_id    BIGINT UNIQUE NOT NULL,
+                username       TEXT,
+                first_name     TEXT,
+                referred_by    BIGINT REFERENCES users(telegram_id) ON DELETE SET NULL,
+                bonus_credits  INT NOT NULL DEFAULT 0,
+                free_used      BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at     TIMESTAMPTZ DEFAULT NOW()
             );
         """)
 
@@ -63,25 +69,175 @@ async def _create_tables(pool: asyncpg.Pool) -> None:
             ON generations (telegram_id, created_at);
         """)
 
+        # Миграция: добавляем новые колонки если таблица уже существовала
+        for col, definition in [
+            ("referred_by",   "BIGINT REFERENCES users(telegram_id) ON DELETE SET NULL"),
+            ("bonus_credits", "INT NOT NULL DEFAULT 0"),
+            ("free_used",     "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ]:
+            await conn.execute(f"""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition};
+            """)
+
     logger.info("Таблицы БД проверены / созданы.")
 
 
 # ── Пользователи ──────────────────────────────────────────────────────────────
 
-async def upsert_user(telegram_id: int, username: str | None, first_name: str | None) -> None:
-    """Создаёт пользователя или обновляет username при повторном /start."""
+async def upsert_user(
+    telegram_id: int,
+    username: str | None,
+    first_name: str | None,
+    referred_by: int | None = None,
+) -> bool:
+    """
+    Создаёт пользователя или обновляет username при повторном /start.
+    referred_by — telegram_id пригласившего, применяется только при первом создании.
+    Возвращает True если пользователь создан впервые, False если уже существовал.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO users (telegram_id, username, first_name)
-            VALUES ($1, $2, $3)
+        row = await conn.fetchrow("""
+            INSERT INTO users (telegram_id, username, first_name, referred_by)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (telegram_id) DO UPDATE
                 SET username   = EXCLUDED.username,
-                    first_name = EXCLUDED.first_name;
-        """, telegram_id, username, first_name)
+                    first_name = EXCLUDED.first_name
+            RETURNING (xmax = 0) AS is_new;
+        """, telegram_id, username, first_name, referred_by)
+        return row["is_new"]
 
 
-# ── Лимиты ────────────────────────────────────────────────────────────────────
+# ── Реферальная система ───────────────────────────────────────────────────────
+
+async def apply_referral_bonus(referrer_id: int) -> bool:
+    """
+    Начисляет +1 бонусный кредит рефереру, если не превышен MAX_REFERRAL_BONUS.
+    Возвращает True если кредит начислен, False если лимит уже достигнут.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE users
+            SET bonus_credits = bonus_credits + 1
+            WHERE telegram_id = $1
+              AND bonus_credits < $2
+            RETURNING bonus_credits;
+        """, referrer_id, MAX_REFERRAL_BONUS)
+        return row is not None
+
+
+async def get_bonus_credits(telegram_id: int) -> int:
+    """Возвращает текущий баланс бонусных кредитов пользователя."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT bonus_credits FROM users WHERE telegram_id = $1;
+        """, telegram_id)
+        return row["bonus_credits"] if row else 0
+
+
+# ── Кредитная логика генерации ────────────────────────────────────────────────
+
+async def try_consume_and_log(
+    telegram_id: int,
+    genre: str,
+    mood: str,
+    voice: str,
+    lang: str,
+) -> tuple[int, str] | None:
+    """
+    Атомарно проверяет наличие кредита и записывает генерацию.
+
+    Порядок списания:
+      1. Разовая бесплатная (free_used = FALSE) — для новых пользователей
+      2. Бонусный кредит (bonus_credits > 0) — реферальные бонусы
+      3. Платно — в будущем; сейчас возвращает None (нет доступа)
+
+    Возвращает (generation_id, credit_type) где credit_type — одно из:
+      'free'  — использована разовая бесплатная генерация
+      'bonus' — списан реферальный кредит
+    Возвращает None если кредитов нет.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Блокируем строку пользователя на время транзакции
+            user = await conn.fetchrow("""
+                SELECT free_used, bonus_credits
+                FROM users
+                WHERE telegram_id = $1
+                FOR UPDATE;
+            """, telegram_id)
+
+            if not user:
+                return None
+
+            credit_type: str | None = None
+
+            if not user["free_used"]:
+                # Списываем разовую бесплатную
+                await conn.execute("""
+                    UPDATE users SET free_used = TRUE WHERE telegram_id = $1;
+                """, telegram_id)
+                credit_type = "free"
+
+            elif user["bonus_credits"] > 0:
+                # Списываем один бонусный кредит
+                await conn.execute("""
+                    UPDATE users SET bonus_credits = bonus_credits - 1
+                    WHERE telegram_id = $1;
+                """, telegram_id)
+                credit_type = "bonus"
+
+            else:
+                # Нет доступных кредитов
+                return None
+
+            new_row = await conn.fetchrow("""
+                INSERT INTO generations (telegram_id, genre, mood, voice, lang, has_music)
+                VALUES ($1, $2, $3, $4, $5, FALSE)
+                RETURNING id;
+            """, telegram_id, genre, mood, voice, lang)
+
+            return new_row["id"], credit_type
+
+
+async def get_credits_info(telegram_id: int) -> dict:
+    """
+    Возвращает полную информацию о кредитах пользователя.
+    Удобно для отображения остатка после генерации.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT free_used, bonus_credits FROM users WHERE telegram_id = $1;
+        """, telegram_id)
+        if not row:
+            return {"free_available": False, "bonus_credits": 0}
+        return {
+            "free_available": not row["free_used"],
+            "bonus_credits":  row["bonus_credits"],
+        }
+
+
+# ── Устаревшие функции (оставлены для обратной совместимости) ─────────────────
+
+async def try_log_generation(
+    telegram_id: int,
+    genre: str,
+    mood: str,
+    voice: str,
+    lang: str,
+    daily_limit: int,
+) -> int | None:
+    """
+    Устарело — используй try_consume_and_log.
+    Оставлено чтобы не сломать другие части кода до их обновления.
+    """
+    result = await try_consume_and_log(telegram_id, genre, mood, voice, lang)
+    return result[0] if result else None
+
 
 async def count_generations_today(telegram_id: int) -> int:
     """Возвращает количество генераций пользователя за сегодня (по UTC)."""
@@ -96,49 +252,6 @@ async def count_generations_today(telegram_id: int) -> int:
         return row["cnt"]
 
 
-async def try_log_generation(
-    telegram_id: int,
-    genre: str,
-    mood: str,
-    voice: str,
-    lang: str,
-    daily_limit: int,
-) -> int | None:
-    """
-    Атомарно проверяет лимит и записывает генерацию в одной транзакции.
-
-    Использует SELECT ... FOR UPDATE чтобы заблокировать строки пользователя
-    на время проверки — исключает race condition при параллельных запросах.
-
-    Возвращает id новой записи, если лимит не исчерпан.
-    Возвращает None, если лимит исчерпан.
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            # Блокируем строки пользователя за сегодня — SELECT id (без агрегата),
-            # FOR UPDATE с COUNT(*) PostgreSQL не поддерживает
-            rows = await conn.fetch("""
-                SELECT id
-                FROM generations
-                WHERE telegram_id = $1
-                  AND created_at >= CURRENT_DATE::TIMESTAMPTZ
-                FOR UPDATE;
-            """, telegram_id)
-
-            # Считаем в Python — атомарность сохранена, race condition исключён
-            if len(rows) >= daily_limit:
-                return None
-
-            new_row = await conn.fetchrow("""
-                INSERT INTO generations (telegram_id, genre, mood, voice, lang, has_music)
-                VALUES ($1, $2, $3, $4, $5, FALSE)
-                RETURNING id;
-            """, telegram_id, genre, mood, voice, lang)
-
-            return new_row["id"]
-
-
 async def log_generation(
     telegram_id: int,
     genre: str,
@@ -147,10 +260,7 @@ async def log_generation(
     lang: str,
     has_music: bool = False,
 ) -> int:
-    """
-    Записывает факт генерации текста в БД без проверки лимита.
-    Возвращает id записи — чтобы позже обновить has_music.
-    """
+    """Записывает факт генерации без проверки лимита. Используется для admins."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
@@ -179,41 +289,47 @@ async def get_stats() -> dict:
         row = await conn.fetchrow("""
             SELECT
                 -- Пользователи
-                (SELECT COUNT(*)            FROM users)                                         AS users_total,
-                (SELECT COUNT(*)            FROM users  WHERE created_at >= CURRENT_DATE)       AS users_today,
-                (SELECT COUNT(*)            FROM users  WHERE created_at >= NOW() - INTERVAL '7 days') AS users_week,
+                (SELECT COUNT(*)   FROM users)                                                   AS users_total,
+                (SELECT COUNT(*)   FROM users  WHERE created_at >= CURRENT_DATE)                 AS users_today,
+                (SELECT COUNT(*)   FROM users  WHERE created_at >= NOW() - INTERVAL '7 days')    AS users_week,
+
+                -- Рефералы
+                (SELECT COUNT(*)   FROM users  WHERE referred_by IS NOT NULL)                    AS referrals_total,
+                (SELECT COALESCE(SUM(bonus_credits), 0) FROM users)                             AS bonus_credits_outstanding,
 
                 -- Тексты (все генерации)
-                (SELECT COUNT(*)            FROM generations)                                   AS texts_total,
-                (SELECT COUNT(*)            FROM generations WHERE created_at >= CURRENT_DATE)  AS texts_today,
-                (SELECT COUNT(*)            FROM generations WHERE created_at >= NOW() - INTERVAL '7 days') AS texts_week,
+                (SELECT COUNT(*)   FROM generations)                                             AS texts_total,
+                (SELECT COUNT(*)   FROM generations WHERE created_at >= CURRENT_DATE)            AS texts_today,
+                (SELECT COUNT(*)   FROM generations WHERE created_at >= NOW() - INTERVAL '7 days') AS texts_week,
 
                 -- Музыка (только has_music = true)
-                (SELECT COUNT(*)            FROM generations WHERE has_music = TRUE)            AS music_total,
-                (SELECT COUNT(*)            FROM generations WHERE has_music = TRUE AND created_at >= CURRENT_DATE) AS music_today,
-                (SELECT COUNT(*)            FROM generations WHERE has_music = TRUE AND created_at >= NOW() - INTERVAL '7 days') AS music_week,
+                (SELECT COUNT(*)   FROM generations WHERE has_music = TRUE)                      AS music_total,
+                (SELECT COUNT(*)   FROM generations WHERE has_music = TRUE AND created_at >= CURRENT_DATE) AS music_today,
+                (SELECT COUNT(*)   FROM generations WHERE has_music = TRUE AND created_at >= NOW() - INTERVAL '7 days') AS music_week,
 
                 -- Конверсия текст → музыка (%)
                 (SELECT ROUND(
                     100.0 * COUNT(*) FILTER (WHERE has_music = TRUE) / NULLIF(COUNT(*), 0), 1
-                ) FROM generations)                                                             AS conversion_pct,
+                ) FROM generations)                                                              AS conversion_pct,
 
                 -- Среднее генераций на пользователя
                 (SELECT ROUND(
                     COUNT(*)::NUMERIC / NULLIF((SELECT COUNT(*) FROM users), 0), 1
-                ) FROM generations)                                                             AS avg_per_user
+                ) FROM generations)                                                              AS avg_per_user
         """)
 
         return {
-            "users_total":      row["users_total"],
-            "users_today":      row["users_today"],
-            "users_week":       row["users_week"],
-            "texts_total":      row["texts_total"],
-            "texts_today":      row["texts_today"],
-            "texts_week":       row["texts_week"],
-            "music_total":      row["music_total"],
-            "music_today":      row["music_today"],
-            "music_week":       row["music_week"],
-            "conversion_pct":   row["conversion_pct"] or 0,
-            "avg_per_user":     row["avg_per_user"] or 0,
+            "users_total":             row["users_total"],
+            "users_today":             row["users_today"],
+            "users_week":              row["users_week"],
+            "referrals_total":         row["referrals_total"],
+            "bonus_credits_outstanding": row["bonus_credits_outstanding"],
+            "texts_total":             row["texts_total"],
+            "texts_today":             row["texts_today"],
+            "texts_week":              row["texts_week"],
+            "music_total":             row["music_total"],
+            "music_today":             row["music_today"],
+            "music_week":              row["music_week"],
+            "conversion_pct":          row["conversion_pct"] or 0,
+            "avg_per_user":            row["avg_per_user"] or 0,
         }
