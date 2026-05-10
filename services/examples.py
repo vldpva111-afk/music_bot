@@ -17,16 +17,16 @@
 # Порядок в списке = порядок отправки пользователю.
 EXAMPLE_SONGS: list[dict] = [
     {
-        "file_id": "TODO_PASTE_FILE_ID_1",
-        "caption": "👨‍👩‍👧 <b>Песня родителям</b> · на русском",
+        "file_id": "CQACAgIAAxkBAAIH8GoAAc_scBjehzGodsGupq0krKNnZwACFacAAkDiCUjc6-rwb1VYfDsE",
+        "caption": "💖 <b>Песня для любимого человека</b>",
     },
     {
-        "file_id": "TODO_PASTE_FILE_ID_2",
-        "caption": "🎂 <b>Поздравление подруги с Днём рождения</b> · на казахском",
+        "file_id": "CQACAgIAAxkBAAIH7moAAc-wkJrnG9lGB2zBrhtiTK3XmQACDacAAkDiCUgV-ChmYSeh2TsE",
+        "caption": "🎂 <b>Туған күнімен құттықтау</b>",
     },
     {
-        "file_id": "TODO_PASTE_FILE_ID_3",
-        "caption": "💕 <b>Любовная песня любимому</b> · на русском",
+        "file_id": "CQACAgIAAxkBAAIH7GoAAclBYFVKaxIObLpDXeBVnPNHnAACyaYAAkDiCUj_HUnyA4s_kTsE",
+        "caption": "👨‍👩‍👧 <b>Песня для мамы и папы</b>",
     },
 ]
 

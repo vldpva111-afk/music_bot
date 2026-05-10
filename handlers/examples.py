@@ -16,6 +16,7 @@
 import logging
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
@@ -28,30 +29,76 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-# ── Утилита для админа: получить file_id из присланного аудио ─────────────────
+# ── Утилита для админа: получить file_id из присланного файла ─────────────────
 
-@router.message(F.audio)
+@router.message(Command("getfileid"))
+async def cmd_getfileid(message: Message) -> None:
+    """Подсказка админу как пользоваться утилитой."""
+    if message.from_user.id not in settings.ADMIN_IDS:
+        return
+    await message.answer(
+        "📂 <b>Получение file_id</b>\n\n"
+        "Просто <b>отправь мне MP3-файл</b> (или перешли) — "
+        "я отвечу его <code>file_id</code>.\n\n"
+        "Принимаю как audio, как voice, и как документ.\n"
+        "Вставь полученные id в <code>services/examples.py</code>.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(F.audio | F.voice | F.document)
 async def on_admin_audio(message: Message) -> None:
     """
     Когда админ присылает аудио — отвечаем его file_id.
+    Принимаем audio, voice и document (на случай если файл прислан как документ).
     Для не-админов ничего не делаем (сообщение пройдёт дальше по роутерам).
     """
     if message.from_user.id not in settings.ADMIN_IDS:
         return
 
-    file_id = message.audio.file_id
-    title = message.audio.title or "(без названия)"
-    duration = message.audio.duration or 0
+    # Определяем тип и достаём метаданные
+    if message.audio:
+        file_id = message.audio.file_id
+        kind = "audio"
+        title = message.audio.title or message.audio.file_name or "(без названия)"
+        duration = message.audio.duration or 0
+        size = message.audio.file_size or 0
+    elif message.voice:
+        file_id = message.voice.file_id
+        kind = "voice"
+        title = "(голосовое сообщение)"
+        duration = message.voice.duration or 0
+        size = message.voice.file_size or 0
+    elif message.document:
+        # Принимаем только аудио-документы, не картинки/архивы
+        mime = (message.document.mime_type or "").lower()
+        if not mime.startswith("audio/"):
+            return
+        file_id = message.document.file_id
+        kind = f"document ({mime})"
+        title = message.document.file_name or "(без имени)"
+        duration = 0
+        size = message.document.file_size or 0
+    else:
+        return
+
+    duration_str = f"{duration} сек" if duration else "—"
+    size_kb = f"{size // 1024} KB" if size else "—"
 
     await message.reply(
-        f"🎵 <b>Получен аудиофайл</b>\n\n"
+        f"🎵 <b>Получен файл</b>\n\n"
+        f"<b>Тип:</b> {kind}\n"
         f"<b>Название:</b> {title}\n"
-        f"<b>Длительность:</b> {duration} сек\n\n"
+        f"<b>Длительность:</b> {duration_str}\n"
+        f"<b>Размер:</b> {size_kb}\n\n"
         f"<b>file_id:</b>\n<code>{file_id}</code>\n\n"
         f"<i>Скопируй и вставь в services/examples.py → EXAMPLE_SONGS</i>",
         parse_mode="HTML",
     )
-    logger.info("Выдан file_id админу %d: %s", message.from_user.id, file_id)
+    logger.info(
+        "Выдан file_id админу %d (%s): %s",
+        message.from_user.id, kind, file_id,
+    )
 
 
 # ── Показ примеров пользователю ───────────────────────────────────────────────
