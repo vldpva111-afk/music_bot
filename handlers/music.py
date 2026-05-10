@@ -15,6 +15,7 @@ from keyboards import get_done_keyboard
 from services.music_service import generate_music_from_text
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
 from database import mark_music_done, log_event, Events
+from services.admin_alerts import alert_admins
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -147,6 +148,20 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
             error_text = (
                 "😔 Временно не можем создать песню — идёт пополнение баланса.\n"
                 "Попробуй чуть позже!"
+            )
+            # Срочный алерт админам — нужно пополнить баланс Suno.
+            # Cooldown внутри alert_admins по ключу 'suno_no_credits' защищает от спама,
+            # если в выходные набежит десяток юзеров одновременно.
+            await alert_admins(
+                callback.bot,
+                (
+                    "⚠️ <b>Suno: кончились кредиты</b>\n\n"
+                    f"Юзер <code>{callback.from_user.id}</code> "
+                    f"не получил песню (generation_id={generation_id}).\n\n"
+                    "👉 Пополни баланс на https://kie.ai/\n"
+                    "<i>Следующий алерт об этой проблеме не раньше чем через 30 мин.</i>"
+                ),
+                key="suno_no_credits",
             )
         else:
             error_text = "❌ Ошибка при создании музыки. Попробуй ещё раз или напиши /start"
