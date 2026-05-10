@@ -368,6 +368,7 @@ class Events:
     Порядок объявления = порядок шагов воронки.
     """
     BOT_STARTED          = "bot_started"            # /start
+    EXAMPLES_SHOWN       = "examples_shown"         # клик «🎧 Послушать примеры»
     FLOW_STARTED         = "flow_started"           # клик «🎵 Новая песня»
     GENRE_SELECTED       = "genre_selected"
     MOOD_SELECTED        = "mood_selected"

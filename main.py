@@ -13,7 +13,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from config import settings
 from database import get_pool, close_pool
-from handlers import start, genre, mood, voice, details, editing, music, cancel, stats
+from handlers import start, genre, mood, voice, details, editing, music, cancel, stats, examples
 
 
 # Команды, которые видны пользователю в выпадающем меню Telegram (рядом с "/")
@@ -37,6 +37,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
     # cancel и stats регистрируем первыми — работают в любом состоянии
     dp.include_router(cancel.router)
     dp.include_router(stats.router)
+    # examples ДО start — чтобы /getfileid (audio от админа) перехватывался первым,
+    # пока админ не находится в фоне состояния SongCreation.
+    dp.include_router(examples.router)
     dp.include_router(start.router)
     dp.include_router(genre.router)
     dp.include_router(mood.router)

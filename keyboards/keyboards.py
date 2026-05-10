@@ -16,11 +16,12 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Главное меню: создание песни, реферальная ссылка, баланс."""
+    """Главное меню: создание песни, примеры, реферальная ссылка, баланс."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎵 Новая песня",     callback_data="create_song")],
-        [InlineKeyboardButton(text="💌 Пригласить друга", callback_data="show_invite")],
-        [InlineKeyboardButton(text="💎 Мой баланс",       callback_data="show_balance")],
+        [InlineKeyboardButton(text="🎵 Новая песня",        callback_data="create_song")],
+        [InlineKeyboardButton(text="🎧 Послушать примеры",  callback_data="show_examples")],
+        [InlineKeyboardButton(text="💌 Пригласить друга",   callback_data="show_invite")],
+        [InlineKeyboardButton(text="💎 Мой баланс",         callback_data="show_balance")],
     ])
 
 
