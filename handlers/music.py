@@ -144,9 +144,20 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(SongCreation.editing)
         await state.update_data(**{_MAKING_MUSIC_KEY: False})
 
-        if "insufficient_credits" in str(e):
+        # Suno может вернуть разные формулировки:
+        #   "insufficient_credits"  — старый формат
+        #   "credits are insufficient. Please top up." — текущий ответ kie.ai
+        #   "code":429               — числовой код в теле JSON
+        # Ловим по подстрокам без учёта регистра.
+        err_str = str(e).lower()
+        is_no_credits = (
+            "insufficient" in err_str
+            or "top up" in err_str
+            or '"code":429' in err_str
+        )
+        if is_no_credits:
             error_text = (
-                "😔 Временно не можем создать песню — идёт пополнение баланса.\n"
+                "😔 Временно не можем создать песню — идут технические работы.\n"
                 "Попробуй чуть позже!"
             )
             # Срочный алерт админам — нужно пополнить баланс Suno.
