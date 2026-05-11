@@ -124,6 +124,34 @@ async def _create_tables(pool: asyncpg.Pool) -> None:
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition};
             """)
 
+        # ── Партнёры и выплаты ────────────────────────────────────────────────
+        # commission_pct хранится как NUMERIC(5,2): возможны значения 0.00–100.00
+        # с двумя знаками после запятой (например, 27.50).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS partners (
+                telegram_id     BIGINT PRIMARY KEY
+                                REFERENCES users(telegram_id) ON DELETE CASCADE,
+                display_name    TEXT,
+                commission_pct  NUMERIC(5,2) NOT NULL DEFAULT 30.0,
+                notes           TEXT,
+                joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS partner_payouts (
+                id          BIGSERIAL PRIMARY KEY,
+                partner_id  BIGINT NOT NULL
+                            REFERENCES partners(telegram_id) ON DELETE CASCADE,
+                amount      INT  NOT NULL,
+                comment     TEXT,
+                paid_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_partner_payouts_partner
+            ON partner_payouts (partner_id, paid_at DESC);
+        """)
+
     logger.info("Таблицы БД проверены / созданы.")
 
 
@@ -550,3 +578,175 @@ async def mark_latest_order_paid(telegram_id: int) -> dict | None:
             RETURNING id, package_key, credits, price, phone;
         """, telegram_id)
         return dict(row) if row else None
+
+
+# ── Партнёрская программа ─────────────────────────────────────────────────────
+
+async def add_partner(
+    telegram_id: int,
+    display_name: str | None,
+    commission_pct: float,
+) -> bool:
+    """
+    Добавляет / обновляет партнёра. Возвращает True если юзер существует
+    в `users` (иначе FK выкинет ошибку — но мы заранее проверяем).
+    Идемпотентно: повторный вызов обновляет имя/процент.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Сначала убедимся что юзер вообще запускал бота
+        user = await conn.fetchrow(
+            "SELECT 1 FROM users WHERE telegram_id = $1;", telegram_id,
+        )
+        if not user:
+            return False
+
+        await conn.execute("""
+            INSERT INTO partners (telegram_id, display_name, commission_pct)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (telegram_id) DO UPDATE
+              SET display_name   = COALESCE(EXCLUDED.display_name, partners.display_name),
+                  commission_pct = EXCLUDED.commission_pct;
+        """, telegram_id, display_name, commission_pct)
+        return True
+
+
+async def remove_partner(telegram_id: int) -> bool:
+    """Удаляет партнёра. Возвращает True если был удалён, False если не было."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM partners WHERE telegram_id = $1;", telegram_id,
+        )
+        # asyncpg возвращает "DELETE 1" или "DELETE 0"
+        return result.endswith("1")
+
+
+async def get_partner(telegram_id: int) -> dict | None:
+    """Возвращает данные партнёра или None."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT telegram_id, display_name, commission_pct, notes, joined_at
+            FROM partners
+            WHERE telegram_id = $1;
+        """, telegram_id)
+        return dict(row) if row else None
+
+
+async def get_partner_stats(telegram_id: int) -> dict | None:
+    """
+    Возвращает статистику конкретного партнёра.
+    Используется в команде /me_partner и в /partner_stats.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        partner = await conn.fetchrow("""
+            SELECT telegram_id, display_name, commission_pct, joined_at
+            FROM partners
+            WHERE telegram_id = $1;
+        """, telegram_id)
+        if not partner:
+            return None
+
+        # Всего привёл клиентов
+        clients_total = await conn.fetchval("""
+            SELECT COUNT(*) FROM users WHERE referred_by = $1;
+        """, telegram_id) or 0
+
+        # Из них оплатили хотя бы один заказ
+        clients_paid = await conn.fetchval("""
+            SELECT COUNT(DISTINCT u.telegram_id)
+            FROM users u
+            JOIN orders o ON o.telegram_id = u.telegram_id
+            WHERE u.referred_by = $1 AND o.status = 'paid';
+        """, telegram_id) or 0
+
+        # Сумма всех оплаченных заказов клиентов партнёра
+        revenue_total = await conn.fetchval("""
+            SELECT COALESCE(SUM(o.price), 0)
+            FROM orders o
+            JOIN users u ON u.telegram_id = o.telegram_id
+            WHERE u.referred_by = $1 AND o.status = 'paid';
+        """, telegram_id) or 0
+
+        # За последние 30 дней
+        revenue_month = await conn.fetchval("""
+            SELECT COALESCE(SUM(o.price), 0)
+            FROM orders o
+            JOIN users u ON u.telegram_id = o.telegram_id
+            WHERE u.referred_by = $1
+              AND o.status = 'paid'
+              AND o.paid_at >= NOW() - INTERVAL '30 days';
+        """, telegram_id) or 0
+
+        # Сколько уже выплачено партнёру
+        paid_out = await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0)
+            FROM partner_payouts
+            WHERE partner_id = $1;
+        """, telegram_id) or 0
+
+        pct = float(partner["commission_pct"])
+        earned_total = int(revenue_total * pct / 100)
+        earned_month = int(revenue_month * pct / 100)
+        pending = earned_total - int(paid_out)
+
+        return {
+            "telegram_id":     partner["telegram_id"],
+            "display_name":    partner["display_name"],
+            "commission_pct":  pct,
+            "joined_at":       partner["joined_at"],
+            "clients_total":   clients_total,
+            "clients_paid":    clients_paid,
+            "revenue_total":   int(revenue_total),
+            "revenue_month":   int(revenue_month),
+            "earned_total":    earned_total,
+            "earned_month":    earned_month,
+            "paid_out":        int(paid_out),
+            "pending":         max(0, pending),
+        }
+
+
+async def list_partner_stats() -> list[dict]:
+    """
+    Возвращает статистику по всем партнёрам — для админской команды
+    /partner_stats. Сортировка: pending DESC (кому больше всего должен).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        partners = await conn.fetch("""
+            SELECT telegram_id FROM partners ORDER BY joined_at ASC;
+        """)
+        rows = []
+        for p in partners:
+            stats = await get_partner_stats(p["telegram_id"])
+            if stats:
+                rows.append(stats)
+        # Сортируем по pending убыванию
+        rows.sort(key=lambda r: r["pending"], reverse=True)
+        return rows
+
+
+async def record_partner_payout(
+    partner_id: int,
+    amount: int,
+    comment: str | None = None,
+) -> int | None:
+    """
+    Записывает факт выплаты партнёру. Возвращает id записи или None
+    если партнёр не найден.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM partners WHERE telegram_id = $1;", partner_id,
+        )
+        if not exists:
+            return None
+        row = await conn.fetchrow("""
+            INSERT INTO partner_payouts (partner_id, amount, comment)
+            VALUES ($1, $2, $3)
+            RETURNING id;
+        """, partner_id, amount, comment)
+        return row["id"]

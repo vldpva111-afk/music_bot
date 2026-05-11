@@ -15,7 +15,7 @@ from config import settings
 from database import get_pool, close_pool
 from handlers import (
     start, genre, mood, voice, details, editing, music,
-    cancel, stats, examples, payment,
+    cancel, stats, examples, payment, partner,
 )
 
 
@@ -48,6 +48,8 @@ def register_all_handlers(dp: Dispatcher) -> None:
     # payment — отдельный поток покупки, имеет своё FSM-состояние Payment.awaiting_phone,
     # не пересекается с SongCreation. Регистрируем до основного флоу.
     dp.include_router(payment.router)
+    # partner — отдельная команда /me_partner, нет своих FSM-состояний
+    dp.include_router(partner.router)
     dp.include_router(start.router)
     dp.include_router(genre.router)
     dp.include_router(mood.router)
