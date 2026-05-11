@@ -89,6 +89,31 @@ async def _create_tables(pool: asyncpg.Pool) -> None:
             ON event_log (telegram_id, ts DESC);
         """)
 
+        # ── Заказы (оплата через Kaspi, ручная обработка) ─────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id            BIGSERIAL PRIMARY KEY,
+                telegram_id   BIGINT NOT NULL,
+                username      TEXT,
+                first_name    TEXT,
+                package_key   TEXT NOT NULL,
+                credits       INT  NOT NULL,
+                price         INT  NOT NULL,
+                phone         TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                paid_at       TIMESTAMPTZ
+            );
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_orders_status_created
+            ON orders (status, created_at DESC);
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_orders_user_status
+            ON orders (telegram_id, status);
+        """)
+
         # Миграция: добавляем новые колонки если таблица уже существовала
         for col, definition in [
             ("referred_by",   "BIGINT REFERENCES users(telegram_id) ON DELETE SET NULL"),
@@ -369,6 +394,10 @@ class Events:
     """
     BOT_STARTED          = "bot_started"            # /start
     EXAMPLES_SHOWN       = "examples_shown"         # клик «🎧 Послушать примеры»
+    BUY_CLICKED          = "buy_clicked"            # клик «💎 Купить кредиты»
+    PACKAGE_SELECTED     = "package_selected"       # выбран тариф
+    PHONE_SUBMITTED      = "phone_submitted"        # юзер отправил телефон
+    ORDER_PAID           = "order_paid"             # админ подтвердил оплату
     FLOW_STARTED         = "flow_started"           # клик «🎵 Новая песня»
     GENRE_SELECTED       = "genre_selected"
     MOOD_SELECTED        = "mood_selected"
@@ -458,3 +487,66 @@ async def get_funnel_stats(period_days: int = 7) -> list[dict]:
         })
         prev = n if n > 0 else prev
     return result
+
+
+# ── Заказы (Kaspi, ручная обработка) ──────────────────────────────────────────
+
+async def create_order(
+    telegram_id: int,
+    username: str | None,
+    first_name: str | None,
+    package_key: str,
+    credits: int,
+    price: int,
+    phone: str,
+) -> int:
+    """Создаёт заказ в статусе pending. Возвращает id заказа."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO orders (
+                telegram_id, username, first_name,
+                package_key, credits, price, phone
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id;
+        """, telegram_id, username, first_name, package_key, credits, price, phone)
+        return row["id"]
+
+
+async def get_pending_orders(limit: int = 20) -> list[dict]:
+    """Возвращает свежие неоплаченные заказы (для админа)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, telegram_id, username, first_name,
+                   package_key, credits, price, phone, created_at
+            FROM orders
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT $1;
+        """, limit)
+        return [dict(r) for r in rows]
+
+
+async def mark_latest_order_paid(telegram_id: int) -> dict | None:
+    """
+    Помечает самый свежий pending-заказ юзера как оплаченный.
+    Возвращает данные заказа или None если нет pending.
+    Используется в /grant — чтобы одной командой и кредиты выдать,
+    и заказ закрыть.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE orders
+            SET status = 'paid', paid_at = NOW()
+            WHERE id = (
+                SELECT id FROM orders
+                WHERE telegram_id = $1 AND status = 'pending'
+                ORDER BY created_at DESC
+                LIMIT 1
+            )
+            RETURNING id, package_key, credits, price, phone;
+        """, telegram_id)
+        return dict(row) if row else None

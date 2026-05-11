@@ -13,16 +13,21 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from config import settings
 from database import get_pool, close_pool
-from handlers import start, genre, mood, voice, details, editing, music, cancel, stats, examples
+from handlers import (
+    start, genre, mood, voice, details, editing, music,
+    cancel, stats, examples, payment,
+)
 
 
 # Команды, которые видны пользователю в выпадающем меню Telegram (рядом с "/")
 USER_COMMANDS = [
     BotCommand(command="start",   description="🎵 Перезапустить бота"),
     BotCommand(command="menu",    description="🏠 Главное меню"),
+    BotCommand(command="buy",     description="💎 Купить кредиты"),
     BotCommand(command="invite",  description="🎁 Получить бонус"),
-    BotCommand(command="balance", description="💰 Мои баланс"),
+    BotCommand(command="balance", description="💰 Мой баланс"),
     BotCommand(command="cancel",  description="❌ Отменить текущее действие"),
+    BotCommand(command="offer",   description="📄 Договор оферты"),
     BotCommand(command="help",    description="❓ Помощь"),
 ]
 
@@ -40,6 +45,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
     # examples ДО start — чтобы /getfileid (audio от админа) перехватывался первым,
     # пока админ не находится в фоне состояния SongCreation.
     dp.include_router(examples.router)
+    # payment — отдельный поток покупки, имеет своё FSM-состояние Payment.awaiting_phone,
+    # не пересекается с SongCreation. Регистрируем до основного флоу.
+    dp.include_router(payment.router)
     dp.include_router(start.router)
     dp.include_router(genre.router)
     dp.include_router(mood.router)

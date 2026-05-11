@@ -17,7 +17,12 @@ from database import (
     get_funnel_stats,
     admin_add_bonus_credits,
     find_user_by_username,
+    get_pending_orders,
+    mark_latest_order_paid,
+    log_event,
+    Events,
 )
+from constants import PACKAGES
 
 
 # Человекочитаемые подписи шагов воронки для отчёта /funnel
@@ -148,25 +153,63 @@ async def cmd_grant(message: Message, command: CommandObject) -> None:
         )
         return
 
+    # Автоматически закрываем последний pending-заказ юзера, если он был.
+    # Это превращает /grant в полноценный «подтверди оплату»: одна команда —
+    # и кредиты начислены, и заказ помечен paid в БД (для статистики).
+    closed_order = await mark_latest_order_paid(target_id)
+
+    order_note = ""
+    if closed_order:
+        order_note = (
+            f"\n\n📦 <b>Закрыт заказ #{closed_order['id']}</b> "
+            f"({closed_order['credits']} кр. за {closed_order['price']} ₸)"
+        )
+        await log_event(
+            target_id,
+            Events.ORDER_PAID,
+            {
+                "order_id":  closed_order["id"],
+                "package":   closed_order["package_key"],
+                "price":     closed_order["price"],
+                "credits":   closed_order["credits"],
+            },
+        )
+
     await message.answer(
         f"✅ Выдано <b>{amount}</b> бонусных кредитов пользователю "
         f"<code>{target_id}</code>.\n"
-        f"Новый баланс бонусов: <b>{new_balance}</b>",
+        f"Новый баланс бонусов: <b>{new_balance}</b>"
+        f"{order_note}",
         parse_mode="HTML",
     )
     logger.info(
-        "Админ %d выдал %d кредитов пользователю %d (новый баланс: %d).",
+        "Админ %d выдал %d кредитов пользователю %d (новый баланс: %d, "
+        "закрыт заказ: %s).",
         message.from_user.id, amount, target_id, new_balance,
+        closed_order["id"] if closed_order else None,
     )
 
-    # Уведомляем получателя — best effort, не падаем если он заблокировал бота
-    try:
-        await message.bot.send_message(
-            target_id,
+    # Уведомляем получателя — best effort, не падаем если он заблокировал бота.
+    # Текст разный в зависимости от того был ли это платный заказ или просто подарок.
+    if closed_order:
+        notify_text = (
+            f"🎉 <b>Оплата получена!</b>\n\n"
+            f"Тебе зачислено <b>{amount}</b> "
+            f"кредит{'' if amount == 1 else 'ов'} на создание песни.\n\n"
+            f"Спасибо за покупку! 🎵\n"
+            f"Жми /menu чтобы создать новую песню."
+        )
+    else:
+        notify_text = (
             f"🎁 Тебе начислено <b>{amount}</b> "
             f"бонус{'ный кредит' if amount == 1 else 'ных кредитов'} "
             f"на создание песни!\n\n"
-            f"Используй их через /menu или /start 🎵",
+            f"Используй их через /menu или /start 🎵"
+        )
+    try:
+        await message.bot.send_message(
+            target_id,
+            notify_text,
             parse_mode="HTML",
         )
     except (TelegramForbiddenError, TelegramBadRequest) as e:
@@ -225,3 +268,34 @@ async def cmd_funnel(message: Message, command: CommandObject) -> None:
 
     await message.answer("\n".join(lines), parse_mode="HTML")
     logger.info("Воронка запрошена админом %d за %d дней.", message.from_user.id, period)
+
+
+# ── /orders — список pending-заказов ──────────────────────────────────────────
+
+@router.message(Command("orders"))
+async def cmd_orders(message: Message) -> None:
+    """Показывает все необработанные заказы — для удобства, если алерт пропустил."""
+    if message.from_user.id not in settings.ADMIN_IDS:
+        return
+
+    orders = await get_pending_orders(limit=20)
+
+    if not orders:
+        await message.answer("✅ Нет необработанных заказов.")
+        return
+
+    lines = [f"📋 <b>Pending заказов: {len(orders)}</b>\n"]
+    for o in orders:
+        pkg_label = PACKAGES.get(o["package_key"], {}).get("label", o["package_key"])
+        username_str = f"@{o['username']}" if o["username"] else "—"
+        created_str = o["created_at"].strftime("%d.%m %H:%M")
+
+        lines.append(
+            f"\n<b>#{o['id']}</b> · {created_str}\n"
+            f"  {username_str} ({o['first_name'] or '—'})\n"
+            f"  📦 {pkg_label} — <b>{o['price']} ₸</b>\n"
+            f"  📱 <code>{o['phone']}</code>\n"
+            f"  👉 <code>/grant {o['telegram_id']} {o['credits']}</code>"
+        )
+
+    await message.answer("\n".join(lines), parse_mode="HTML")

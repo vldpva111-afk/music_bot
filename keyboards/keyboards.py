@@ -3,9 +3,14 @@
 Тексты кнопок берутся из constants.py — единственного источника правды.
 """
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
-from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_LABELS
+from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_LABELS, PACKAGES
 
 
 # ── Старт / Главное меню ──────────────────────────────────────────────────────
@@ -16,13 +21,43 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Главное меню: создание песни, примеры, реферальная ссылка, баланс."""
+    """Главное меню: создание песни, примеры, покупка, реферал, баланс."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Новая песня",        callback_data="create_song")],
         [InlineKeyboardButton(text="🎧 Послушать примеры",  callback_data="show_examples")],
-        [InlineKeyboardButton(text="💌 Пригласить друга",   callback_data="show_invite")],
-        [InlineKeyboardButton(text="💎 Мой баланс",         callback_data="show_balance")],
+        [InlineKeyboardButton(text="� Купить кредиты",     callback_data="buy_credits")],
+        [InlineKeyboardButton(text="�💌 Пригласить друга",   callback_data="show_invite")],
+        [InlineKeyboardButton(text="� Мой баланс",         callback_data="show_balance")],
     ])
+
+
+# ── Покупка кредитов ──────────────────────────────────────────────────────────
+
+def get_packages_keyboard() -> InlineKeyboardMarkup:
+    """Список тарифов. Каждая кнопка — callback_data = ключ пакета."""
+    rows = []
+    for key, pkg in PACKAGES.items():
+        rows.append([InlineKeyboardButton(
+            text=f"{pkg['label']} — {pkg['price']} ₸",
+            callback_data=key,
+        )])
+    rows.append([InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_phone_request_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Reply-клавиатура с запросом номера телефона. В отличие от inline,
+    позволяет Telegram'у самому прислать номер юзера одной кнопкой.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Отправить мой номер", request_contact=True)],
+            [KeyboardButton(text="❌ Отменить заказ")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 # ── Жанр ─────────────────────────────────────────────────────────────────────
