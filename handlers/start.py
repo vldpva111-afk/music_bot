@@ -3,6 +3,7 @@
 """
 
 import logging
+import time
 
 from aiogram import Router, Bot
 from aiogram.filters import CommandStart, CommandObject
@@ -17,6 +18,28 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Дедупликация дублирующих /start — Telegram-клиенты иногда шлют команду
+# дважды при клике на Start-кнопку (особенно на desktop). Храним последний
+# timestamp /start по каждому юзеру в памяти процесса.
+_START_DEDUP_WINDOW_SEC = 3.0
+_recent_starts: dict[int, float] = {}
+
+
+def _is_duplicate_start(user_id: int) -> bool:
+    """True если этот /start пришёл в окне дедупликации после предыдущего."""
+    now = time.monotonic()
+    last = _recent_starts.get(user_id)
+    _recent_starts[user_id] = now
+
+    # Лёгкая чистка: если словарь распух — удаляем старые записи.
+    # Не делаем чаще, чтобы не тратить CPU на каждом /start.
+    if len(_recent_starts) > 1000:
+        cutoff = now - _START_DEDUP_WINDOW_SEC * 10
+        for uid in [u for u, t in _recent_starts.items() if t < cutoff]:
+            _recent_starts.pop(uid, None)
+
+    return last is not None and (now - last) < _START_DEDUP_WINDOW_SEC
 
 WELCOME_IMAGE_URL = settings.WELCOME_IMAGE_URL
 
@@ -73,9 +96,18 @@ async def cmd_start(
     state: FSMContext,
     command: CommandObject,
 ) -> None:
+    user = message.from_user
+
+    # Дедуп дублей /start (Telegram-клиенты иногда шлют команду дважды).
+    # Игнорируем второй /start в течение ~3 секунд — без ответа юзеру.
+    if _is_duplicate_start(user.id):
+        logger.info(
+            "Дубль /start от пользователя %d — пропускаем.", user.id,
+        )
+        return
+
     await state.clear()
 
-    user = message.from_user
     referrer_id = _parse_referrer_id(command.args, self_id=user.id)
 
     is_new = await upsert_user(

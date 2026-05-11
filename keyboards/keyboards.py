@@ -25,9 +25,9 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎵 Новая песня",        callback_data="create_song")],
         [InlineKeyboardButton(text="🎧 Послушать примеры",  callback_data="show_examples")],
-        [InlineKeyboardButton(text="� Купить кредиты",     callback_data="buy_credits")],
-        [InlineKeyboardButton(text="�💌 Пригласить друга",   callback_data="show_invite")],
-        [InlineKeyboardButton(text="� Мой баланс",         callback_data="show_balance")],
+        [InlineKeyboardButton(text="💎 Купить кредиты",     callback_data="buy_credits")],
+        [InlineKeyboardButton(text="💌 Пригласить друга",   callback_data="show_invite")],
+        [InlineKeyboardButton(text="💰 Мой баланс",         callback_data="show_balance")],
     ])
 
 
