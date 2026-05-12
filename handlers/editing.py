@@ -20,7 +20,23 @@ from database import log_event, Events
 logger = logging.getLogger(__name__)
 router = Router()
 
-_EDITING_KEY = "is_editing"
+_EDITING_KEY    = "is_editing"
+_REVISIONS_KEY  = "revisions_used"
+
+# Сколько раз за один цикл создания песни юзер может бесплатно
+# воспользоваться "Внести правки" + "Сгенерировать заново" суммарно.
+# Защита от фарма OpenAI-токенов на одном free-кредите.
+# Считаются ТОЛЬКО успешные операции — если OpenAI упал, попытка не списывается.
+MAX_REVISIONS_PER_CYCLE = 15
+
+
+def _format_limit_message(used: int) -> str:
+    return (
+        f"⚠️ <b>Лимит правок исчерпан</b> ({used} / {MAX_REVISIONS_PER_CYCLE}).\n\n"
+        f"Чтобы продолжать улучшать тексты — нажми «Создать песню» с текущим "
+        f"вариантом или начни новую песню (потребуется кредит).\n\n"
+        f"<i>Лимит сделан, чтобы AI-сервис оставался доступным для всех 🙏</i>"
+    )
 
 
 # ── Кнопка "Внести правки" ────────────────────────────────────────────────────
@@ -28,11 +44,30 @@ _EDITING_KEY = "is_editing"
 @router.callback_query(SongCreation.editing, lambda c: c.data == "edit_song")
 async def on_edit_requested(callback: CallbackQuery, state: FSMContext) -> None:
     """Переводим в состояние ожидания правок — теперь любое сообщение = правки."""
+    # Проверяем лимит ДО того как увести юзера в awaiting_edit —
+    # иначе он напечатает свои правки впустую.
+    data = await state.get_data()
+    used = data.get(_REVISIONS_KEY, 0)
+    if used >= MAX_REVISIONS_PER_CYCLE:
+        await callback.answer("Лимит правок исчерпан", show_alert=False)
+        await callback.message.answer(
+            _format_limit_message(used),
+            parse_mode="HTML",
+            reply_markup=get_result_keyboard(),
+        )
+        return
+
     await state.set_state(SongCreation.awaiting_edit)
     await log_event(callback.from_user.id, Events.EDIT_REQUESTED)
+
+    # Подсказка по остатку правок — мягко, чтобы юзер видел сколько у него ещё есть
+    remaining = MAX_REVISIONS_PER_CYCLE - used
+    hint = f"\n\n<i>Осталось правок: {remaining} из {MAX_REVISIONS_PER_CYCLE}</i>"
+
     await callback.message.answer(
         "✏️ Напиши, что хочешь изменить в песне:\n\n"
-        "<i>Например: «сделай припев веселее», «добавь упоминание котика», «убери слово»</i>",
+        "<i>Например: «сделай припев веселее», «добавь упоминание котика», «убери слово»</i>"
+        + hint,
         parse_mode="HTML",
         reply_markup=get_cancel_edit_keyboard(),
     )
@@ -78,6 +113,17 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
         await message.answer("Не могу найти оригинальный текст. Начни сначала — /start")
         return
 
+    # Доп.проверка лимита — на случай гонки или прямого попадания в awaiting_edit
+    used = data.get(_REVISIONS_KEY, 0)
+    if used >= MAX_REVISIONS_PER_CYCLE:
+        await state.set_state(SongCreation.editing)
+        await message.answer(
+            _format_limit_message(used),
+            parse_mode="HTML",
+            reply_markup=get_result_keyboard(),
+        )
+        return
+
     await state.update_data(**{_EDITING_KEY: True})
     loading_msg = await message.answer("⏳ Вношу правки в песню...")
 
@@ -90,18 +136,45 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
             voice=data.get("voice"),
         )
 
-        await state.update_data(current_song=edited_song, **{_EDITING_KEY: False})
+        # Инкремент ТОЛЬКО при успехе — упавшая попытка не списывается
+        new_used = used + 1
+        await state.update_data(
+            current_song=edited_song,
+            **{_EDITING_KEY: False, _REVISIONS_KEY: new_used},
+        )
         await state.set_state(SongCreation.editing)
         await loading_msg.delete()
 
+        # Если это была последняя правка — сразу предупредим
+        footer = ""
+        if new_used >= MAX_REVISIONS_PER_CYCLE:
+            footer = (
+                f"\n\n⚠️ <i>Это была последняя правка "
+                f"({new_used}/{MAX_REVISIONS_PER_CYCLE}). "
+                f"Лимит исчерпан — теперь только «Создать песню».</i>"
+            )
+        elif MAX_REVISIONS_PER_CYCLE - new_used <= 3:
+            footer = (
+                f"\n\n<i>Осталось правок: "
+                f"{MAX_REVISIONS_PER_CYCLE - new_used} из {MAX_REVISIONS_PER_CYCLE}</i>"
+            )
+
         await message.answer(
             "🎵 <b>Вот обновлённый текст песни:</b>\n\n"
-            f"{edited_song}",
+            f"{edited_song}"
+            f"{footer}",
             parse_mode="HTML",
             reply_markup=get_result_keyboard(),
         )
-        logger.info("Правки внесены для %d.", message.from_user.id)
-        await log_event(message.from_user.id, Events.EDIT_APPLIED)
+        logger.info(
+            "Правки внесены для %d (использовано %d/%d).",
+            message.from_user.id, new_used, MAX_REVISIONS_PER_CYCLE,
+        )
+        await log_event(
+            message.from_user.id,
+            Events.EDIT_APPLIED,
+            {"revisions_used": new_used},
+        )
 
     except Exception as e:
         logger.error("Ошибка правок для %d: %s", message.from_user.id, e)
@@ -123,6 +196,17 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
     # Защита от параллельных запросов
     if data.get(_EDITING_KEY):
         await callback.answer("⏳ Подожди, ещё обрабатываю...", show_alert=False)
+        return
+
+    # Лимит — общий со списком правок
+    used = data.get(_REVISIONS_KEY, 0)
+    if used >= MAX_REVISIONS_PER_CYCLE:
+        await callback.answer("Лимит правок исчерпан", show_alert=False)
+        await callback.message.answer(
+            _format_limit_message(used),
+            parse_mode="HTML",
+            reply_markup=get_result_keyboard(),
+        )
         return
 
     genre   = data.get("genre",  "genre_pop")
@@ -148,16 +232,39 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
             genre=genre, mood=mood, voice=voice, details=details, lang=lang,
         )
 
-        await state.update_data(current_song=new_song, **{_EDITING_KEY: False})
+        # Инкремент только при успехе
+        new_used = used + 1
+        await state.update_data(
+            current_song=new_song,
+            **{_EDITING_KEY: False, _REVISIONS_KEY: new_used},
+        )
         await loading_msg.delete()
+
+        # Тот же footer-механизм, что и в правках
+        footer = ""
+        if new_used >= MAX_REVISIONS_PER_CYCLE:
+            footer = (
+                f"\n\n⚠️ <i>Это была последняя бесплатная регенерация "
+                f"({new_used}/{MAX_REVISIONS_PER_CYCLE}). "
+                f"Лимит исчерпан — теперь только «Создать песню».</i>"
+            )
+        elif MAX_REVISIONS_PER_CYCLE - new_used <= 3:
+            footer = (
+                f"\n\n<i>Осталось правок/регенераций: "
+                f"{MAX_REVISIONS_PER_CYCLE - new_used} из {MAX_REVISIONS_PER_CYCLE}</i>"
+            )
 
         await callback.message.answer(
             "🎵 <b>Новый вариант готов:</b>\n\n"
-            f"{new_song}",
+            f"{new_song}"
+            f"{footer}",
             parse_mode="HTML",
             reply_markup=get_result_keyboard(),
         )
-        logger.info("Повторная генерация для %d.", callback.from_user.id)
+        logger.info(
+            "Повторная генерация для %d (использовано %d/%d).",
+            callback.from_user.id, new_used, MAX_REVISIONS_PER_CYCLE,
+        )
 
     except Exception as e:
         logger.error("Ошибка повторной генерации для %d: %s", callback.from_user.id, e)
