@@ -392,7 +392,29 @@ async def get_stats() -> dict:
                 -- Среднее генераций на пользователя
                 (SELECT ROUND(
                     COUNT(*)::NUMERIC / NULLIF((SELECT COUNT(*) FROM users), 0), 1
-                ) FROM generations)                                                              AS avg_per_user
+                ) FROM generations)                                                              AS avg_per_user,
+
+                -- Активность: уникальные юзеры, сделавшие любое действие (event_log)
+                (SELECT COUNT(DISTINCT telegram_id) FROM event_log
+                    WHERE ts >= CURRENT_DATE)                                                    AS active_today,
+                (SELECT COUNT(DISTINCT telegram_id) FROM event_log
+                    WHERE ts >= CURRENT_DATE - INTERVAL '1 day' AND ts < CURRENT_DATE)           AS active_yesterday,
+                (SELECT COUNT(DISTINCT telegram_id) FROM event_log
+                    WHERE ts >= CURRENT_DATE - INTERVAL '7 days')                                AS active_week,
+                (SELECT COUNT(DISTINCT telegram_id) FROM event_log
+                    WHERE ts >= CURRENT_DATE - INTERVAL '30 days')                               AS active_month,
+
+                -- Новые vs возвращающиеся сегодня (разбивка DAU)
+                (SELECT COUNT(DISTINCT el.telegram_id)
+                    FROM event_log el
+                    JOIN users u ON u.telegram_id = el.telegram_id
+                    WHERE el.ts >= CURRENT_DATE
+                      AND u.created_at >= CURRENT_DATE)                                          AS active_new_today,
+                (SELECT COUNT(DISTINCT el.telegram_id)
+                    FROM event_log el
+                    JOIN users u ON u.telegram_id = el.telegram_id
+                    WHERE el.ts >= CURRENT_DATE
+                      AND u.created_at <  CURRENT_DATE)                                          AS active_returning_today
         """)
 
         return {
@@ -409,6 +431,12 @@ async def get_stats() -> dict:
             "music_week":              row["music_week"],
             "conversion_pct":          row["conversion_pct"] or 0,
             "avg_per_user":            row["avg_per_user"] or 0,
+            "active_today":            row["active_today"],
+            "active_yesterday":        row["active_yesterday"],
+            "active_week":             row["active_week"],
+            "active_month":            row["active_month"],
+            "active_new_today":        row["active_new_today"],
+            "active_returning_today":  row["active_returning_today"],
         }
 
 

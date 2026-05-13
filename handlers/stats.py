@@ -72,10 +72,18 @@ async def cmd_stats(message: Message) -> None:
     text = (
         "📊 <b>Статистика бота</b>\n\n"
 
-        "👥 <b>Пользователи</b>\n"
+        "👥 <b>Пользователи (новые регистрации)</b>\n"
         f"  Всего: {stats['users_total']}\n"
         f"  Сегодня: {stats['users_today']}\n"
         f"  За 7 дней: {stats['users_week']}\n\n"
+
+        "🔥 <b>Активность (уникальные юзеры)</b>\n"
+        f"  Сегодня: <b>{stats['active_today']}</b> "
+        f"(новых: {stats['active_new_today']}, "
+        f"вернулось: {stats['active_returning_today']})\n"
+        f"  Вчера: {stats['active_yesterday']}\n"
+        f"  За 7 дней: {stats['active_week']}\n"
+        f"  За 30 дней: {stats['active_month']}\n\n"
 
         "✍️ <b>Тексты песен (генерации)</b>\n"
         f"  Всего: {stats['texts_total']}\n"
