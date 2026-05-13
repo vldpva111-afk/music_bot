@@ -329,6 +329,60 @@ async def get_credits_info(telegram_id: int) -> dict:
         }
 
 
+async def refund_credit(
+    telegram_id: int,
+    credit_type: str,
+    generation_id: int | None = None,
+) -> bool:
+    """
+    Возвращает кредит пользователю, если генерация не была доставлена.
+
+    Вызывается из хэндлера music.py при неудачной доставке песни
+    (timeout аплоада в Telegram, ошибка Suno и т.п.).
+
+    credit_type:
+        'free'  → восстанавливает free_used = FALSE (юзер снова может бесплатно)
+        'bonus' → +1 к bonus_credits
+        'admin' → не списывалось, no-op
+        'paid'  → +1 к bonus_credits (платные хранятся там же)
+
+    Возвращает True если кредит реально вернулся, False — если no-op.
+    """
+    if credit_type in (None, "admin"):
+        return False
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if credit_type == "free":
+                await conn.execute("""
+                    UPDATE users SET free_used = FALSE
+                    WHERE telegram_id = $1 AND free_used = TRUE;
+                """, telegram_id)
+            elif credit_type in ("bonus", "paid"):
+                await conn.execute("""
+                    UPDATE users SET bonus_credits = bonus_credits + 1
+                    WHERE telegram_id = $1;
+                """, telegram_id)
+            else:
+                logger.warning("refund_credit: неизвестный credit_type=%r", credit_type)
+                return False
+
+            # Удаляем неудачную генерацию из таблицы, чтобы не портила статистику
+            # (она всё равно осталась has_music=FALSE и не имеет ценности)
+            if generation_id is not None:
+                await conn.execute(
+                    "DELETE FROM generations WHERE id = $1;",
+                    generation_id,
+                )
+
+            logger.info(
+                "Кредит возвращён юзеру %d (тип=%s, generation_id=%s)",
+                telegram_id, credit_type, generation_id,
+            )
+            return True
+
+
 async def log_generation(
     telegram_id: int,
     genre: str,

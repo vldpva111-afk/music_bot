@@ -7,6 +7,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import ErrorEvent, BotCommand, BotCommandScopeDefault
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
@@ -66,7 +67,15 @@ async def main() -> None:
     logger.info("Запуск бота...")
 
     storage = RedisStorage.from_url(settings.REDIS_URL)
-    bot     = Bot(token=settings.BOT_TOKEN)
+
+    # ── HTTP-сессия с увеличенным таймаутом ───────────────────────────────────
+    # Дефолт AiohttpSession = 60 сек, чего НЕ ХВАТАЕТ на upload mp3 3–5 MB:
+    # при медленном линке Telegram-сервер принимает файл 70–120 сек, и
+    # сессия рубит соединение раньше → юзер теряет кредит без песни.
+    # 300 сек = 5 мин: с запасом покрывает любой реалистичный upload.
+    # На long-polling getUpdates не влияет (там свой timeout по протоколу).
+    session = AiohttpSession(timeout=300.0)
+    bot     = Bot(token=settings.BOT_TOKEN, session=session)
     dp      = Dispatcher(storage=storage)
 
     register_all_handlers(dp)

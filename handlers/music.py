@@ -14,7 +14,12 @@ from states import SongCreation
 from keyboards import get_done_keyboard
 from services.music_service import generate_music_from_text
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
-from database import mark_music_done, log_event, Events
+from database import mark_music_done, refund_credit, log_event, Events
+
+# Таймаут на заливку одного mp3 в Telegram (в секундах).
+# Дефолт в aiogram = 60 сек, этого не хватает на файлы 3–5 MB при медленном линке.
+# 180 сек — страховочный запас, реальная заливка укладывается в 30–80 сек.
+SEND_AUDIO_TIMEOUT = 180.0
 from services.admin_alerts import alert_admins
 
 router = Router()
@@ -88,9 +93,8 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
         if not audio_chunks:
             raise Exception("No audio data received from API")
 
-        if generation_id:
-            await mark_music_done(generation_id)
-
+        # Сначала заливаем все варианты — если хотя бы один упадёт, поймаем в except
+        # и вернём кредит. mark_music_done вызываем ТОЛЬКО после успеха.
         for i, audio_bytes in enumerate(audio_chunks, start=1):
             caption = (
                 "🎉 Твоя персональная песня готова! Слушай прямо здесь 👆"
@@ -107,7 +111,12 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
                 title=f"Твоя песня — вариант {i}",
                 performer="ПоздравОК",
                 caption=caption,
+                request_timeout=SEND_AUDIO_TIMEOUT,
             )
+
+        # Все треки успешно залиты — теперь можно фиксировать доставку
+        if generation_id:
+            await mark_music_done(generation_id)
 
         # Удаляем статус только когда все треки уже отправлены
         try:
@@ -134,10 +143,34 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
 
     except Exception as e:
         logger.error("Ошибка генерации музыки для %s: %s", callback.from_user.id, e)
+
+        # ВОЗВРАЩАЕМ КРЕДИТ — юзер не получил песню, не должен терять деньги.
+        # credit_type сохранён в FSM из details.py при исходном списании.
+        # Для админов он 'admin' — refund_credit вернёт False, это ok.
+        credit_type = data.get("credit_type")
+        refunded = False
+        if credit_type and generation_id:
+            try:
+                refunded = await refund_credit(
+                    telegram_id=callback.from_user.id,
+                    credit_type=credit_type,
+                    generation_id=generation_id,
+                )
+            except Exception as refund_err:
+                logger.error(
+                    "refund_credit упал для юзера %s (gen=%s): %s",
+                    callback.from_user.id, generation_id, refund_err,
+                )
+
         await log_event(
             callback.from_user.id,
             Events.MUSIC_FAILED,
-            {"generation_id": generation_id, "error": str(e)[:200]},
+            {
+                "generation_id": generation_id,
+                "error": str(e)[:200],
+                "refunded": refunded,
+                "credit_type": credit_type,
+            },
         )
 
         # Возвращаем в editing — пользователь может попробовать снова
@@ -155,10 +188,17 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
             or "top up" in err_str
             or '"code":429' in err_str
         )
+        # Суффикс про возврат кредита — показываем только если реально вернули
+        refund_suffix = (
+            "\n\n💰 <i>Кредит возвращён, можешь попробовать ещё раз.</i>"
+            if refunded else ""
+        )
+
         if is_no_credits:
             error_text = (
                 "😔 Временно не можем создать песню — идут технические работы.\n"
                 "Попробуй чуть позже!"
+                f"{refund_suffix}"
             )
             # Срочный алерт админам — нужно пополнить баланс Suno.
             # Cooldown внутри alert_admins по ключу 'suno_no_credits' защищает от спама,
@@ -175,10 +215,13 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
                 key="suno_no_credits",
             )
         else:
-            error_text = "❌ Ошибка при создании музыки. Попробуй ещё раз или напиши /start"
+            error_text = (
+                "❌ Ошибка при создании музыки. Попробуй ещё раз или напиши /start"
+                f"{refund_suffix}"
+            )
 
         try:
-            await loading_msg.edit_text(error_text)
+            await loading_msg.edit_text(error_text, parse_mode="HTML")
         except Exception:
             # Сообщение уже удалено или недоступно — шлём новым
             await callback.bot.send_message(

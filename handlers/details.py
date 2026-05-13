@@ -177,6 +177,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             current_song=song_text,
             generation_id=generation_id,
             last_details=user_details,
+            credit_type=credit_type,  # нужно для refund_credit при ошибке доставки
             **{_GENERATING_KEY: False},
         )
         await state.set_state(SongCreation.editing)
