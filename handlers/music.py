@@ -101,9 +101,14 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
                 if i == 1
                 else f"🎵 Вариант {i}"
             )
+            # Уникальное имя файла критично: Telegram-клиенты кешируют
+            # скачанные аудио по filename. Если у двух песен у одного юзера
+            # имя совпадает — при «скачать» вторую он получит первую из кеша.
+            # generation_id уникален в БД → коллизий не будет.
+            unique_id = generation_id if generation_id else int(asyncio.get_event_loop().time() * 1000)
             audio_file = BufferedInputFile(
                 file=audio_bytes,
-                filename=f"song_variant_{i}.mp3",
+                filename=f"pozdravok_{unique_id}_v{i}.mp3",
             )
             await callback.bot.send_audio(
                 chat_id=callback.message.chat.id,
