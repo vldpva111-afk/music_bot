@@ -63,6 +63,13 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
 
     song_text     = data.get("current_song")
     generation_id = data.get("generation_id")
+    user_details  = (data.get("last_details") or "").strip()
+
+    # Строим персональный заголовок песни из деталей запроса — чтобы в библиотеке
+    # Telegram юзер мог отличить «песня маме» от «песня брату Алишеру».
+    # Берём первую строку, первые 30 символов, чистим хвостовую пунктуацию.
+    title_hint = user_details.split("\n")[0][:30].strip().rstrip(",.!?…- ")
+    title_base = f"Песня · {title_hint}" if title_hint else "Твоя песня"
 
     if not song_text:
         await state.update_data(**{_MAKING_MUSIC_KEY: False})
@@ -110,10 +117,15 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
                 file=audio_bytes,
                 filename=f"pozdravok_{unique_id}_v{i}.mp3",
             )
+            # Если вариантов больше одного — добавляем суффикс «(вар. N)»,
+            # иначе чистый title без хвоста.
+            song_title = (
+                f"{title_base} (вар. {i})" if len(audio_chunks) > 1 else title_base
+            )
             await callback.bot.send_audio(
                 chat_id=callback.message.chat.id,
                 audio=audio_file,
-                title=f"Твоя песня — вариант {i}",
+                title=song_title,
                 performer="ПоздравОК",
                 caption=caption,
                 request_timeout=SEND_AUDIO_TIMEOUT,
