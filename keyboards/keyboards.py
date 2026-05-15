@@ -11,6 +11,20 @@ from aiogram.types import (
 )
 
 from constants import GENRE_LABELS, MOOD_LABELS, VOICE_LABELS, LANG_LABELS, PACKAGES
+from config import settings
+
+
+def _support_button() -> list[InlineKeyboardButton] | None:
+    """
+    Возвращает строку с URL-кнопкой поддержки, если SUPPORT_USERNAME задан.
+    URL-кнопка не требует хэндлера — Telegram сам открывает переписку.
+    """
+    if not settings.SUPPORT_USERNAME:
+        return None
+    return [InlineKeyboardButton(
+        text="💬 Служба поддержки",
+        url=f"https://t.me/{settings.SUPPORT_USERNAME}",
+    )]
 
 
 # ── Старт / Главное меню ──────────────────────────────────────────────────────
@@ -22,13 +36,16 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Главное меню: создание песни, примеры, покупка, реферал, баланс."""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text="🎵 Новая песня",        callback_data="create_song")],
         [InlineKeyboardButton(text="🎧 Послушать примеры",  callback_data="show_examples")],
         [InlineKeyboardButton(text="💎 Купить кредиты",     callback_data="buy_credits")],
         [InlineKeyboardButton(text="💌 Пригласить друга",   callback_data="show_invite")],
         [InlineKeyboardButton(text="💰 Мой баланс",         callback_data="show_balance")],
-    ])
+    ]
+    if (btn := _support_button()):
+        rows.append(btn)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ── Покупка кредитов ──────────────────────────────────────────────────────────
@@ -141,6 +158,20 @@ def get_result_keyboard() -> InlineKeyboardMarkup:
 def get_done_keyboard() -> InlineKeyboardMarkup:
     """После готовой музыки показываем главное меню — все варианты под рукой."""
     return get_main_menu_keyboard()
+
+
+# ── Сообщение об ошибке ───────────────────────────────────────────────────────
+
+def get_error_keyboard() -> InlineKeyboardMarkup:
+    """
+    Клавиатура к сообщению об ошибке: кнопка поддержки (если настроена) + в меню.
+    Ловим юзера на пике раздражения и даём прямой канал связи.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if (btn := _support_button()):
+        rows.append(btn)
+    rows.append([InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ── Во время ожидания правок ──────────────────────────────────────────────────

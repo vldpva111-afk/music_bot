@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
-from keyboards import get_done_keyboard
+from keyboards import get_done_keyboard, get_error_keyboard
 from services.music_service import generate_music_from_text
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
 from database import mark_music_done, refund_credit, log_event, Events
@@ -237,13 +237,15 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
                 f"{refund_suffix}"
             )
 
+        error_kb = get_error_keyboard()
         try:
-            await loading_msg.edit_text(error_text, parse_mode="HTML")
+            await loading_msg.edit_text(error_text, parse_mode="HTML", reply_markup=error_kb)
         except Exception:
             # Сообщение уже удалено или недоступно — шлём новым
             await callback.bot.send_message(
                 chat_id=callback.message.chat.id,
                 text=error_text,
+                reply_markup=error_kb,
             )
 
     finally:
