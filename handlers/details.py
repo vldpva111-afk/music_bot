@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
 from states import SongCreation
-from keyboards import get_details_keyboard, get_result_keyboard
+from keyboards import get_details_keyboard, get_result_keyboard, get_packages_keyboard
 from services.openai_service import generate_song
 from constants import LANG_LABELS, VALID_LANGS
 from config import settings
@@ -63,22 +63,30 @@ async def on_own_text(callback: CallbackQuery, state: FSMContext) -> None:
 # ── Ввод деталей / текста ──────────────────────────────────────────────────────
 
 async def _build_no_credits_text(message: Message) -> str:
-    """Сообщение когда у пользователя кончились кредиты — со ссылкой-приглашением."""
+    """
+    Сообщение когда у пользователя кончились кредиты.
+    Сразу предлагаем купить (главный путь монетизации) — реферальная программа
+    остаётся как мелкий fallback-абзац внизу, чтобы не перетягивать внимание.
+    """
     user_id = message.from_user.id
     try:
         me = await message.bot.me()
         ref_link = f"https://t.me/{me.username}?start=ref_{user_id}"
     except Exception:
-        # На случай если bot.me() упадёт — отдадим сообщение без ссылки
         ref_link = None
 
     text = (
-        "❌ У тебя закончились бесплатные генерации.\n\n"
-        "Получи <b>+1 бонусный кредит</b> за каждого друга, "
-        "который зарегистрируется по твоей ссылке 🎵"
+        "💎 <b>У тебя закончились кредиты</b>\n\n"
+        "1 кредит = 1 готовая песня (текст + музыка). "
+        "Кредиты не сгорают — используй когда захочешь.\n\n"
+        "<b>Выбери пакет:</b>"
     )
     if ref_link:
-        text += f"\n\n<b>Твоя ссылка:</b>\n<code>{ref_link}</code>"
+        text += (
+            f"\n\n<i>💡 Или приглашай друзей: за каждого зарегистрировавшегося "
+            f"по твоей ссылке — <b>+1 бонусный кредит</b>.\n"
+            f"<code>{ref_link}</code></i>"
+        )
     return text
 
 
@@ -146,6 +154,7 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
                 await _build_no_credits_text(message),
                 parse_mode="HTML",
                 disable_web_page_preview=True,
+                reply_markup=get_packages_keyboard(),
             )
             return
         generation_id, credit_type = result
