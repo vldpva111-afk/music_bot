@@ -11,10 +11,10 @@ from aiogram.exceptions import TelegramBadRequest
 
 from states import SongCreation
 from keyboards import get_details_keyboard, get_result_keyboard, get_packages_keyboard
-from services.openai_service import generate_song
+from services.openai_service import generate_song, RefusalError
 from constants import LANG_LABELS, VALID_LANGS
 from config import settings
-from database import try_consume_and_log, log_generation, get_credits_info, log_event, Events
+from database import try_consume_and_log, log_generation, get_credits_info, log_event, Events, refund_credit
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -216,6 +216,35 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             user_id,
             Events.TEXT_GENERATED,
             {"generation_id": generation_id, "credit_type": credit_type},
+        )
+
+    except RefusalError as e:
+        # Модель отказалась во всех попытках — возвращаем кредит и показываем мягкое сообщение.
+        # НЕ показываем фразу-отказ в UI и НЕ отправляем её в Suno.
+        logger.warning(
+            "OpenAI отказался во всех попытках для %d. raw=%r",
+            user_id, e.raw_text[:200],
+        )
+        await state.update_data(**{_GENERATING_KEY: False})
+        await log_event(user_id, Events.TEXT_FAILED, {"error": "refusal", "raw": e.raw_text[:200]})
+
+        # Возвращаем кредит (для админа refund_credit вернёт False, это ok).
+        refunded = False
+        try:
+            refunded = await refund_credit(
+                telegram_id=user_id,
+                credit_type=credit_type,
+                generation_id=generation_id,
+            )
+        except Exception as refund_err:
+            logger.error("refund_credit упал для %d: %s", user_id, refund_err)
+
+        refund_note = "\n\n💰 Кредит возвращён." if refunded else ""
+        await loading_msg.edit_text(
+            "🤔 Не получилось сгенерировать текст по этому описанию.\n\n"
+            "Попробуй переформулировать — добавь больше деталей о человеке "
+            "(имя, профессия, увлечения, повод)."
+            + refund_note
         )
 
     except Exception as e:

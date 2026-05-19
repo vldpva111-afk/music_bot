@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
 from keyboards import get_result_keyboard, get_cancel_edit_keyboard
-from services.openai_service import edit_song, generate_song
+from services.openai_service import edit_song, generate_song, RefusalError
 from database import log_event, Events
 
 logger = logging.getLogger(__name__)
@@ -176,6 +176,20 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
             {"revisions_used": new_used},
         )
 
+    except RefusalError as e:
+        # Модель отказалась во всех попытках. Правки не стоят кредита — refund не нужен.
+        # Не инкрементируем счётчик правок — юзер может попробовать ещё.
+        logger.warning(
+            "OpenAI отказался при правке для %d. raw=%r",
+            message.from_user.id, e.raw_text[:200],
+        )
+        await state.update_data(**{_EDITING_KEY: False})
+        await state.set_state(SongCreation.editing)
+        await loading_msg.edit_text(
+            "🤔 Не получилось внести эти правки. Попробуй сформулировать их иначе.\n\n"
+            "Нажми «Внести правки» снова 👇",
+        )
+
     except Exception as e:
         logger.error("Ошибка правок для %d: %s", message.from_user.id, e)
         await state.update_data(**{_EDITING_KEY: False})
@@ -264,6 +278,18 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
         logger.info(
             "Повторная генерация для %d (использовано %d/%d).",
             callback.from_user.id, new_used, MAX_REVISIONS_PER_CYCLE,
+        )
+
+    except RefusalError as e:
+        # Регенерация тоже не стоит кредита — refund не нужен. Белим без инкремента счётчика.
+        logger.warning(
+            "OpenAI отказался при регенерации для %d. raw=%r",
+            callback.from_user.id, e.raw_text[:200],
+        )
+        await state.update_data(**{_EDITING_KEY: False})
+        await loading_msg.edit_text(
+            "🤔 Не получилось сгенерировать новый вариант. "
+            "Попробуй внести правки вместо этого 👇",
         )
 
     except Exception as e:

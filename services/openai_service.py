@@ -4,6 +4,7 @@
 Промпты живут в prompts.py — редактируй только там.
 """
 
+import asyncio
 import logging
 import re
 
@@ -13,18 +14,80 @@ from services.prompts import build_generate_prompt, build_edit_prompt
 
 logger = logging.getLogger(__name__)
 
+# На сколько попыток ретраим если модель отказалась. При temperature 0.7-0.8 отказы оказываются
+# стохастичны: в «~98%» случаев повторный вызов срабатывает нормально. 3 попытки — разумный баланс
+# между надёжностью и задержкой.
+_REFUSAL_RETRY_ATTEMPTS = 3
+_REFUSAL_RETRY_DELAY_SEC = 0.5
+
+
+class RefusalError(Exception):
+    """
+    Модель отказалась генерировать текст во всех попытках (политики OpenAI).
+    Бросается только после исчерпания всех ретраев.
+
+    Хэндлер должен поймать это отдельно от общих ошибок и:
+    - вернуть кредит юзеру
+    - показать понятное сообщение «попробуй другие детали»
+    - НЕ отправлять фразу-отказ в Suno (Suno спокойно споёт что угодно).
+    """
+    def __init__(self, raw_text: str):
+        self.raw_text = raw_text
+        super().__init__(f"OpenAI refused after {_REFUSAL_RETRY_ATTEMPTS} attempts: {raw_text[:120]!r}")
+
 
 # ── Постобработка ответа OpenAI ───────────────────────────────────────────────
 # Модель регулярно нарушает запреты и добавляет: предисловия («Отличное! Я убрал...»),
 # заголовки («Название: ...»), мета-теги в скобках («(Легкий ритм)»), которые Suno
 # зачитывает голосом и портит песню. Чистим программно — defense in depth.
 
-# Маркеры секций песни (после первого такого начинается «настоящий» текст)
+# Маркеры секций песни (после первого такого начинается «настоящий» текст).
+# Этот же паттерн использует детектор отказа ниже — если в тексте есть [Куплет]/[Verse], это точно песня.
 _SECTION_PATTERN = re.compile(
     r"^\s*\[?\s*(Куплет|Припев|Бридж|Предприпев|Переход|Вступление|Финал|"
     r"Verse|Chorus|Bridge|Pre-?chorus|Hook|Intro|Outro|Pre|Post)",
     re.IGNORECASE,
 )
+
+
+# ── Детектор отказов модели ──────────────────────────────────────────
+# Регулярка ловит типичные начала отказов на ru/en. Срабатывает только если
+# текст ОЧЕНЬ короткий (<250 символов) И НЕ содержит маркеров песни.
+# Это исключает ложные срабатывания на песнях, где случайно есть слово «не могу».
+_REFUSAL_RE = re.compile(
+    r"^\s*("
+    # «Извините, [но] [я] не могу...» — оба слова опциональны
+    r"извини[тл]?е?,?\s*(но\s+)?(я\s+)?не\s+могу|"
+    # «К сожалению, [но] [я] не могу...»
+    r"к\s+сожалению,?\s*(но\s+)?(я\s+)?не\s+могу|"
+    # «Я не могу помочь/выполнить/написать/создать» (без преамбулы)
+    r"я\s+не\s+могу\s+(помочь|выполнить|написать|создать)|"
+    # English variants: «I'm sorry, [but] I can't/cannot ...»
+    r"i'?m\s+sorry,?\s*(but\s+)?i\s+(can'?t|cannot)|"
+    r"i\s+cannot\s+(help|assist|create|write)|"
+    r"sorry,?\s*i\s+can'?t"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def looks_like_refusal(text: str) -> bool:
+    """
+    Возвращает True если ответ модели — отказ, а не песня.
+    Эвристика:
+    1. Текст короткий (< 250 символов) — настоящая песня обычно 400-800.
+    2. Нет секционных маркеров песни ([Куплет], [Verse], [Припев]...).
+    3. Начинается с типичной фразы-отказа.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    if len(stripped) > 250:
+        return False
+    # Если есть структурные маркеры — это точно песня (даже если коротко)
+    if _SECTION_PATTERN.search(stripped):
+        return False
+    return bool(_REFUSAL_RE.match(stripped))
 
 # Префиксы строк, которые точно являются прологом / болтовнёй модели
 _PROLOGUE_PREFIXES = (
@@ -182,29 +245,49 @@ async def generate_song(
         genre, mood, voice, lang,
     )
 
-    try:
-        response = await get_client().chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            max_tokens=settings.OPENAI_MAX_TOKENS,
-            temperature=settings.OPENAI_TEMPERATURE_GENERATE,
-        )
-        raw = response.choices[0].message.content.strip()
-        song_text = _clean_lyrics(raw)
-        if len(raw) - len(song_text) > 20:
-            logger.warning(
-                "Очистили текст генерации: %d → %d символов (модель добавила мусор)",
-                len(raw), len(song_text),
+    # Retry-логика: при отказе модели пробуем ещё раз. Отказы стохастичны
+    # (из-за temperature) — вторая попытка обычно срабатывает нормально.
+    raw = ""
+    for attempt in range(1, _REFUSAL_RETRY_ATTEMPTS + 1):
+        try:
+            response = await get_client().chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE_GENERATE,
             )
-        logger.info("Текст песни успешно сгенерирован.")
-        return song_text
+            raw = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error("Ошибка OpenAI API при генерации (attempt %d): %s", attempt, e)
+            raise
 
-    except Exception as e:
-        logger.error("Ошибка OpenAI при генерации песни: %s", e)
-        raise
+        if not looks_like_refusal(raw):
+            # Успех — модель вернула песню
+            song_text = _clean_lyrics(raw)
+            if len(raw) - len(song_text) > 20:
+                logger.warning(
+                    "Очистили текст генерации: %d → %d символов (модель добавила мусор)",
+                    len(raw), len(song_text),
+                )
+            if attempt > 1:
+                logger.info("Текст песни сгенерирован со второй+ попытки (attempt=%d).", attempt)
+            else:
+                logger.info("Текст песни успешно сгенерирован.")
+            return song_text
+
+        # Отказ — логгируем и идём на следующую попытку (если есть)
+        logger.warning(
+            "OpenAI отказался (attempt %d/%d): %r",
+            attempt, _REFUSAL_RETRY_ATTEMPTS, raw[:120],
+        )
+        if attempt < _REFUSAL_RETRY_ATTEMPTS:
+            await asyncio.sleep(_REFUSAL_RETRY_DELAY_SEC)
+
+    # Все попытки исчерпаны — реальный отказ. Пусть хэндлер поймает и обработает
+    raise RefusalError(raw)
 
 
 async def edit_song(
@@ -238,26 +321,42 @@ async def edit_song(
 
     logger.info("Редактируем текст песни по запросу пользователя.")
 
-    try:
-        response = await get_client().chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            max_tokens=settings.OPENAI_MAX_TOKENS,
-            temperature=settings.OPENAI_TEMPERATURE_EDIT,
-        )
-        raw = response.choices[0].message.content.strip()
-        edited_song = _clean_lyrics(raw)
-        if len(raw) - len(edited_song) > 20:
-            logger.warning(
-                "Очистили текст правки: %d → %d символов (модель добавила пролог/ремарки)",
-                len(raw), len(edited_song),
+    # Retry-логика аналогично generate_song — модель может стохастично отказать и на правках.
+    raw = ""
+    for attempt in range(1, _REFUSAL_RETRY_ATTEMPTS + 1):
+        try:
+            response = await get_client().chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE_EDIT,
             )
-        logger.info("Правки успешно внесены.")
-        return edited_song
+            raw = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error("Ошибка OpenAI API при редактировании (attempt %d): %s", attempt, e)
+            raise
 
-    except Exception as e:
-        logger.error("Ошибка OpenAI при редактировании песни: %s", e)
-        raise
+        if not looks_like_refusal(raw):
+            edited_song = _clean_lyrics(raw)
+            if len(raw) - len(edited_song) > 20:
+                logger.warning(
+                    "Очистили текст правки: %d → %d символов (модель добавила пролог/ремарки)",
+                    len(raw), len(edited_song),
+                )
+            if attempt > 1:
+                logger.info("Правки внесены со второй+ попытки (attempt=%d).", attempt)
+            else:
+                logger.info("Правки успешно внесены.")
+            return edited_song
+
+        logger.warning(
+            "OpenAI отказался при правке (attempt %d/%d): %r",
+            attempt, _REFUSAL_RETRY_ATTEMPTS, raw[:120],
+        )
+        if attempt < _REFUSAL_RETRY_ATTEMPTS:
+            await asyncio.sleep(_REFUSAL_RETRY_DELAY_SEC)
+
+    raise RefusalError(raw)
