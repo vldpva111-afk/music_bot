@@ -13,7 +13,6 @@ from aiogram.fsm.context import FSMContext
 from states import SongCreation
 from keyboards import get_done_keyboard, get_error_keyboard
 from services.music_service import generate_music_from_text
-from services.openai_service import looks_like_refusal
 from constants import GENRE_STYLE, MOOD_STYLE, VOICE_STYLE
 from database import mark_music_done, refund_credit, log_event, Events
 
@@ -75,54 +74,6 @@ async def on_make_music(callback: CallbackQuery, state: FSMContext) -> None:
     if not song_text:
         await state.update_data(**{_MAKING_MUSIC_KEY: False})
         await callback.message.answer("❌ Не найден текст песни. Начни сначала — /start")
-        return
-
-    # ── Финальная защита перед Suno ──────────────────────────────────────────
-    # FSM в Redis может содержать «плохой» текст (отказ модели), сохранённый ДО
-    # релиза детектора, ИЛИ юзер мог вставить отказ через «свой текст».
-    # Если current_song похож на отказ — НЕ отправляем в Suno (он спокойно споёт
-    # «Извините, я не могу помочь»), возвращаем кредит и просим начать заново.
-    if looks_like_refusal(song_text):
-        logger.warning(
-            "Заблокировали отправку песни-отказа в Suno для %d (text=%r)",
-            callback.from_user.id, song_text[:120],
-        )
-        credit_type = data.get("credit_type")
-        refunded = False
-        if credit_type and generation_id:
-            try:
-                refunded = await refund_credit(
-                    telegram_id=callback.from_user.id,
-                    credit_type=credit_type,
-                    generation_id=generation_id,
-                )
-            except Exception as refund_err:
-                logger.error(
-                    "refund_credit упал для %s: %s",
-                    callback.from_user.id, refund_err,
-                )
-        await log_event(
-            callback.from_user.id,
-            Events.MUSIC_FAILED,
-            {
-                "generation_id": generation_id,
-                "error": "refusal_text_blocked",
-                "refunded": refunded,
-                "credit_type": credit_type,
-            },
-        )
-        # Чистим FSM, чтобы юзер не мог дёрнуть ту же кнопку повторно
-        await state.clear()
-        refund_suffix = (
-            "\n\n💰 <i>Кредит возвращён.</i>" if refunded else ""
-        )
-        await callback.message.answer(
-            "🙅 По этому тексту не получится создать песню.\n\n"
-            "Начни заново — /start — и опиши человека более тепло, "
-            "без чувствительных тем."
-            f"{refund_suffix}",
-            parse_mode="HTML",
-        )
         return
 
     genre = data.get("genre", "genre_pop")

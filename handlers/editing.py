@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 
 from states import SongCreation
 from keyboards import get_result_keyboard, get_cancel_edit_keyboard
-from services.openai_service import edit_song, generate_song, RefusalError
+from services.openai_service import edit_song, generate_song
 from database import log_event, Events
 
 logger = logging.getLogger(__name__)
@@ -176,18 +176,6 @@ async def on_edit_text_received(message: Message, state: FSMContext) -> None:
             {"revisions_used": new_used},
         )
 
-    except RefusalError:
-        # Модель отказалась от правок (юзер попросил что-то запрещённое).
-        # Кредит не списался — возвращать нечего. Просто просим переформулировать.
-        logger.info("OpenAI отказал на правку для %d", message.from_user.id)
-        await state.update_data(**{_EDITING_KEY: False})
-        await state.set_state(SongCreation.editing)
-        await loading_msg.edit_text(
-            "🙅 Не могу внести такие правки.\n\n"
-            "Попробуй переформулировать без чувствительных тем. "
-            "Нажми «Внести правки» снова 👇",
-        )
-
     except Exception as e:
         logger.error("Ошибка правок для %d: %s", message.from_user.id, e)
         await state.update_data(**{_EDITING_KEY: False})
@@ -276,16 +264,6 @@ async def on_regenerate(callback: CallbackQuery, state: FSMContext) -> None:
         logger.info(
             "Повторная генерация для %d (использовано %d/%d).",
             callback.from_user.id, new_used, MAX_REVISIONS_PER_CYCLE,
-        )
-
-    except RefusalError:
-        # Модель отказалась (видимо детали last_details были чувствительными
-        # и модель передумала). Кредит не списывался — возвращать нечего.
-        logger.info("OpenAI отказал на повторную генерацию для %d", callback.from_user.id)
-        await state.update_data(**{_EDITING_KEY: False})
-        await loading_msg.edit_text(
-            "🙅 По этим деталям не получилось создать новый вариант. "
-            "Текущий текст остаётся без изменений 👇",
         )
 
     except Exception as e:

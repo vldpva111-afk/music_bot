@@ -11,13 +11,10 @@ from aiogram.exceptions import TelegramBadRequest
 
 from states import SongCreation
 from keyboards import get_details_keyboard, get_result_keyboard
-from services.openai_service import generate_song, RefusalError
+from services.openai_service import generate_song
 from constants import LANG_LABELS, VALID_LANGS
 from config import settings
-from database import (
-    try_consume_and_log, log_generation, get_credits_info,
-    log_event, Events, refund_credit,
-)
+from database import try_consume_and_log, log_generation, get_credits_info, log_event, Events
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -212,61 +209,12 @@ async def on_details_entered(message: Message, state: FSMContext) -> None:
             {"generation_id": generation_id, "credit_type": credit_type},
         )
 
-    except RefusalError:
-        # Модель отказалась генерировать (политики OpenAI). Возвращаем кредит,
-        # просим юзера переформулировать. НЕ отправляем эту фразу в Suno.
-        await state.update_data(**{_GENERATING_KEY: False})
-        refunded = False
-        if not is_admin and credit_type:
-            try:
-                refunded = await refund_credit(
-                    telegram_id=user_id,
-                    credit_type=credit_type,
-                    generation_id=generation_id,
-                )
-            except Exception as refund_err:
-                logger.error("refund_credit упал для %d: %s", user_id, refund_err)
-        await log_event(
-            user_id, Events.TEXT_FAILED,
-            {"error": "openai_refusal", "refunded": refunded, "credit_type": credit_type},
-        )
-        refund_suffix = (
-            "\n\n💰 <i>Кредит возвращён.</i>" if refunded else ""
-        )
-        await loading_msg.edit_text(
-            "🙅 По этому описанию я не могу написать песню.\n\n"
-            "Попробуй переформулировать — например, убрать "
-            "потенциально чувствительные темы (политика, обиды, "
-            "оскорбления) и описать человека более тепло."
-            f"{refund_suffix}",
-            parse_mode="HTML",
-        )
-
     except Exception as e:
         logger.error("Ошибка генерации для %d: %s", user_id, e)
         await state.update_data(**{_GENERATING_KEY: False})
-        # Возвращаем кредит при любой технической ошибке генерации текста.
-        refunded = False
-        if not is_admin and credit_type:
-            try:
-                refunded = await refund_credit(
-                    telegram_id=user_id,
-                    credit_type=credit_type,
-                    generation_id=generation_id,
-                )
-            except Exception as refund_err:
-                logger.error("refund_credit упал для %d: %s", user_id, refund_err)
-        await log_event(
-            user_id, Events.TEXT_FAILED,
-            {"error": str(e)[:200], "refunded": refunded, "credit_type": credit_type},
-        )
-        refund_suffix = (
-            "\n\n💰 <i>Кредит возвращён.</i>" if refunded else ""
-        )
+        await log_event(user_id, Events.TEXT_FAILED, {"error": str(e)[:200]})
         await loading_msg.edit_text(
             "😔 Произошла ошибка при генерации. Попробуй ещё раз — напиши детали заново."
-            f"{refund_suffix}",
-            parse_mode="HTML",
         )
 
 

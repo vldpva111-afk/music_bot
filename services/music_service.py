@@ -99,26 +99,14 @@ async def _wait_task(session: aiohttp.ClientSession, task_id: str) -> list[bytes
             status    = task_data.get("status")
             logger.info("Music task status: %s", status)
 
-            # Любой fail-статус ловим СРАЗУ — не ждём 4 минуты до timeout.
-            # Suno возвращает разные варианты: GENERATE_AUDIO_FAILED,
-            # CREATE_TASK_FAILED, CALLBACK_EXCEPTION, SENSITIVE_WORD_ERROR и т.п.
-            # Ловим по подстроке, чтобы быть устойчивыми к новым типам ошибок.
-            status_upper = status.upper() if status else ""
-            if any(kw in status_upper for kw in ("FAIL", "ERROR", "EXCEPTION")):
-                err_msg = task_data.get("errorMessage") or "unknown"
-                err_code = task_data.get("errorCode")
-                raise Exception(
-                    f"Music generation failed [{status}, code={err_code}]: {err_msg}"
-                )
-
-            # failed / error (lowercase, на всякий случай — старый формат)
-            if status in {"failed", "error"}:
-                raise Exception(f"Music generation failed with status '{status}': {data}")
-
             # PENDING и другие промежуточные — ждём
             if status not in TERMINAL_STATUSES and status != "TEXT_SUCCESS":
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
+
+            # failed / error — сразу бросаем
+            if status in {"failed", "error"}:
+                raise Exception(f"Music generation failed with status '{status}': {data}")
 
             # SUCCESS или TEXT_SUCCESS — ищем лучший доступный URL
             response_block = task_data.get("response") or {}
