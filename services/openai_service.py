@@ -52,7 +52,7 @@ _REFUSAL_RE = re.compile(
 )
 
 
-def _looks_like_refusal(text: str) -> bool:
+def looks_like_refusal(text: str) -> bool:
     """
     Возвращает True если ответ модели — отказ, а не песня.
     Эвристика:
@@ -253,7 +253,7 @@ async def generate_song(
 
         # КРИТИЧНО: детектим отказ ОПЕРЕД чисткой. Иначе фраза-отказ
         # вроде «Извините, я не могу помочь» уйдёт в Suno и станет текстом песни.
-        if _looks_like_refusal(raw):
+        if looks_like_refusal(raw):
             logger.warning("OpenAI вернул отказ на генерацию: %r", raw[:120])
             raise RefusalError(raw)
 
@@ -319,7 +319,7 @@ async def edit_song(
         raw = response.choices[0].message.content.strip()
 
         # На правках отказ тоже возможен (юзер попросил что-то запрещенное).
-        if _looks_like_refusal(raw):
+        if looks_like_refusal(raw):
             logger.warning("OpenAI вернул отказ на правку: %r", raw[:120])
             raise RefusalError(raw)
 
