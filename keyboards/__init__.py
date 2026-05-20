@@ -9,7 +9,6 @@ from .keyboards import (
     get_done_keyboard,
     get_error_keyboard,
     get_cancel_edit_keyboard,
-    get_no_credits_keyboard,
     get_packages_keyboard,
     get_phone_request_keyboard,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "get_done_keyboard",
     "get_error_keyboard",
     "get_cancel_edit_keyboard",
-    "get_no_credits_keyboard",
     "get_packages_keyboard",
     "get_phone_request_keyboard",
 ]
