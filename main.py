@@ -16,7 +16,7 @@ from config import settings
 from database import get_pool, close_pool
 from handlers import (
     start, genre, mood, voice, details, editing, music,
-    cancel, stats, examples, payment, partner,
+    cancel, stats, examples, payment, partner, support,
 )
 
 
@@ -58,6 +58,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
     dp.include_router(details.router)
     dp.include_router(editing.router)
     dp.include_router(music.router)
+    # support.router — ПОСЛЕДНИЙ: catch-all для свободного текста вне FSM.
+    # Если зарегистрировать раньше, перехватит ввод деталей/редактирования.
+    dp.include_router(support.router)
 
 
 async def main() -> None:
