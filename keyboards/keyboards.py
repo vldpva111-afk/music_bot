@@ -138,7 +138,12 @@ def get_details_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=short, callback_data=f"lang_{code}")
             for code, short in _LANG_SHORT.items()
         ],
-        [InlineKeyboardButton(text="✍️ У меня есть готовый текст", callback_data="own_text")],
+        # ВРЕМЕННО СКРЫТО: юзеры путают «свой текст песни» с «описание человека»,
+        # вводят пару строк деталей → текст уходит напрямую в Suno → бессмысленный
+        # огрызок песни. Вернуть только после доработки UX (инструкция + валидация
+        # длины/строк). Обработчик on_own_text в handlers/details.py оставлен,
+        # чтобы можно было откатить одной строкой.
+        # [InlineKeyboardButton(text="✍️ У меня есть готовый текст", callback_data="own_text")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_voice")],
     ])
 
@@ -172,6 +177,19 @@ def get_error_keyboard() -> InlineKeyboardMarkup:
         rows.append(btn)
     rows.append([InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ── Когда у юзера закончились кредиты ─────────────────────────────────────────
+
+def get_no_credits_keyboard() -> InlineKeyboardMarkup:
+    """
+    Показывается когда юзер пытается создать песню без кредитов.
+    Даёт два пути: купить или пригласить друга (бонус по рефералке).
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Купить кредиты", callback_data="buy_credits")],
+        [InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_menu")],
+    ])
 
 
 # ── Во время ожидания правок ──────────────────────────────────────────────────
