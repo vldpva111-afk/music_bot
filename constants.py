@@ -156,10 +156,10 @@ VALID_LANGS: frozenset[str] = frozenset(LANG_LABELS)
 # key (callback_data) → описание пакета.
 # Цены в тенге, credits — сколько песен начисляется после оплаты.
 PACKAGES: dict[str, dict] = {
-    "pkg_1":  {"credits": 1,  "price": 1490, "label": "1 песня",   "per_unit": 1490},
-    "pkg_3":  {"credits": 3,  "price": 3290, "label": "3 песни",   "per_unit": 1097},
-    "pkg_5":  {"credits": 5,  "price": 4990, "label": "5 песен",   "per_unit": 998},
-    "pkg_10": {"credits": 10, "price": 8490, "label": "10 песен",  "per_unit": 849},
+    "pkg_1":  {"credits": 1,  "price": 790, "label": "1 песня",   "per_unit": 790},
+    "pkg_3":  {"credits": 3,  "price": 1990, "label": "3 песни",   "per_unit": 663},
+    "pkg_5":  {"credits": 5,  "price": 2990, "label": "5 песен",   "per_unit": 598},
+    "pkg_10": {"credits": 10, "price": 4990, "label": "10 песен",  "per_unit": 499},
 }
 
 VALID_PACKAGES: frozenset[str] = frozenset(PACKAGES)
